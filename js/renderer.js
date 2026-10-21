@@ -1,6 +1,6 @@
 // WebGL2 host for the glass-note shader: DNA → uniforms, morphing between notes, snapshots.
 
-import { VERT, FRAG, FRAG_TILE } from './shader.js';
+import { VERT, FRAG, FRAG_TILE, POST_DOWN, POST_UP, POST_COMPOSITE } from './shader.js';
 import { SHAPE_KEYS, toParams, layout } from './note-geometry.js';
 
 export const VIEWS = [
@@ -27,8 +27,9 @@ export const SCENES = [
 
 const UNIFORMS = [
   'uRes', 'uTime', 'uCam', 'uShift', 'uZoom', 'uH1', 'uH2', 'uS1', 'uS2', 'uBeam', 'uBeam2', 'uShape', 'uSurf', 'uLook',
-  'uLook2', 'uLive', 'uLive2', 'uEnv', 'uRip', 'uRipStr', 'uTile',
+  'uLook2', 'uLive', 'uLive2', 'uEnv', 'uRip', 'uRipStr', 'uTile', 'uFx',
 ];
+const POST_UNIFORMS = ['uSrc', 'uSrcTexel', 'uDstSize', 'uThreshold', 'uScene', 'uBloom', 'uStrength', 'uTint'];
 
 const MAX_RIPPLES = 12;
 
@@ -84,6 +85,8 @@ export class NoteRenderer {
     this.morphStart = 0;
     this.morphDuration = 1.6;
     this.live = { bass: 0, mid: 0, high: 0, beat: 0, level: 0 };
+    // The latest big hit: how hard it landed (0..1) and how many seconds ago.
+    this.fx = { impact: 0, age: 99 };
     this.look = { view: 0, material: 0, scene: 0, influence: 0.7, ripples: true };
     this.camera = { yaw: 0, pitch: 0.12, zoom: 1 };
     this.shift = [0, 0];
@@ -107,7 +110,121 @@ export class NoteRenderer {
       const program = link(gl, source);
       return { program, loc: Object.fromEntries(UNIFORMS.map((name) => [name, gl.getUniformLocation(program, name)])) };
     });
+    const post = (source) => {
+      const program = link(gl, source);
+      return { program, loc: Object.fromEntries(POST_UNIFORMS.map((name) => [name, gl.getUniformLocation(program, name)])) };
+    };
+    this.post = { down: post(POST_DOWN), up: post(POST_UP), composite: post(POST_COMPOSITE) };
+    // Half-float glow buffers where the device can render to them, so bright light doesn't clip.
+    this.hdr = !!(gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float'));
     this.vao = gl.createVertexArray();
+    this.targets = null;
+  }
+
+  createTarget(w, h, hdr) {
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    if (hdr) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    if (hdr && gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.deleteFramebuffer(fbo);
+      gl.deleteTexture(tex);
+      this.hdr = false;
+      return this.createTarget(w, h, false);
+    }
+    return { tex, fbo, w, h };
+  }
+
+  // The scene buffer plus a ladder of glow buffers, each half the size of the one before.
+  createTargets(w, h) {
+    const levels = [];
+    let lw = Math.max(1, w >> 1);
+    let lh = Math.max(1, h >> 1);
+    while (levels.length < 5 && Math.min(lw, lh) >= 8) {
+      levels.push(this.createTarget(lw, lh, this.hdr));
+      lw >>= 1;
+      lh >>= 1;
+    }
+    return { w, h, scene: this.createTarget(w, h, false), levels };
+  }
+
+  deleteTargets(t) {
+    const gl = this.gl;
+    for (const target of [t.scene, ...t.levels, t.out].filter(Boolean)) {
+      gl.deleteFramebuffer(target.fbo);
+      gl.deleteTexture(target.tex);
+    }
+  }
+
+  // How much glow each look gets: strong halation for the logo-like tile, gentler for the sculpture,
+  // little on the light studio set, and a burst on every big hit.
+  glowSettings() {
+    const { view, scene } = this.look;
+    let threshold = view === 1 ? 0.75 : 0.78;
+    let strength = view === 1 ? 0.4 : 0.3;
+    if (scene === 1) {
+      threshold = 0.92;
+      strength = 0.2;
+    } else if (scene === 4) {
+      strength *= 1.3;
+    } else if (scene === 5) {
+      threshold = 0.85;
+      strength = 0.22;
+    }
+    strength += this.fx.impact * 0.45 * Math.exp(-this.fx.age * 3);
+    return { threshold, strength };
+  }
+
+  glow(t, out) {
+    const gl = this.gl;
+    const { threshold, strength } = this.glowSettings();
+    gl.disable(gl.SCISSOR_TEST);
+    gl.bindVertexArray(this.vao);
+    const pass = (prog, src, dst, extra) => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
+      gl.viewport(0, 0, dst.w, dst.h);
+      gl.useProgram(prog.program);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, src.tex);
+      gl.uniform1i(prog.loc.uSrc, 0);
+      gl.uniform2f(prog.loc.uSrcTexel, 1 / src.w, 1 / src.h);
+      gl.uniform2f(prog.loc.uDstSize, dst.w, dst.h);
+      extra?.();
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    };
+    let src = t.scene;
+    t.levels.forEach((dst, i) => {
+      pass(this.post.down, src, dst, () => gl.uniform1f(this.post.down.loc.uThreshold, i === 0 ? threshold : -1));
+      src = dst;
+    });
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    for (let i = t.levels.length - 1; i > 0; i--) pass(this.post.up, t.levels[i], t.levels[i - 1]);
+    gl.disable(gl.BLEND);
+
+    const c = this.post.composite;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, out ? out.fbo : null);
+    gl.viewport(0, 0, t.w, t.h);
+    gl.useProgram(c.program);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, t.scene.tex);
+    gl.uniform1i(c.loc.uScene, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, t.levels.length ? t.levels[0].tex : t.scene.tex);
+    gl.uniform1i(c.loc.uBloom, 1);
+    gl.uniform2f(c.loc.uDstSize, t.w, t.h);
+    gl.uniform1f(c.loc.uStrength, t.levels.length ? strength : 0);
+    gl.uniform3f(c.loc.uTint, 1.0, 0.97, 1.03);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.activeTexture(gl.TEXTURE0);
   }
 
   // A quiet change (only the colour moved) blends quickly without the glass going molten.
@@ -181,7 +298,14 @@ export class NoteRenderer {
   render(time) {
     if (!this.current || this.gl.isContextLost()) return;
     this.resize();
-    this.draw(time, this.canvas.width, this.canvas.height, this.shift);
+    const { width: w, height: h } = this.canvas;
+    if (!this.targets || this.targets.w !== w || this.targets.h !== h) {
+      if (this.targets) this.deleteTargets(this.targets);
+      this.targets = this.createTargets(w, h);
+    }
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.targets.scene.fbo);
+    this.draw(time, w, h, this.shift);
+    this.glow(this.targets, null);
   }
 
   draw(time, w, h, shift) {
@@ -215,6 +339,7 @@ export class NoteRenderer {
     gl.uniform4f(u.uLive2, this.live.level, p.pulse, surge, this.look.ripples ? 1 : 0);
     gl.uniform1fv(u.uEnv, p.envelope);
     gl.uniform4f(u.uTile, p.rimA * Math.PI * 2, p.rimB * Math.PI * 2, p.pullA, p.pullB);
+    gl.uniform4f(u.uFx, this.fx.impact, this.fx.age, 0, 0);
     gl.uniform4fv(u.uRip, this.ripples);
     gl.uniform1fv(u.uRipStr, this.rippleStrength);
     gl.bindVertexArray(this.vao);
@@ -225,12 +350,9 @@ export class NoteRenderer {
   // in horizontal bands so no single draw call runs long enough to trip a GPU watchdog.
   snapshot(time, width, height = width, shift = [0, 0]) {
     const gl = this.gl;
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    const fbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    const t = this.createTargets(width, height);
+    t.out = this.createTarget(width, height, false);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.scene.fbo);
     const band = Math.max(64, Math.floor(400000 / width));
     gl.enable(gl.SCISSOR_TEST);
     for (let y = 0; y < height; y += band) {
@@ -238,11 +360,12 @@ export class NoteRenderer {
       this.draw(time, width, height, shift);
     }
     gl.disable(gl.SCISSOR_TEST);
+    this.glow(t, t.out);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.out.fbo);
     const pixels = new Uint8Array(width * height * 4);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.deleteFramebuffer(fbo);
-    gl.deleteTexture(tex);
+    this.deleteTargets(t);
 
     const out = document.createElement('canvas');
     out.width = width;

@@ -521,6 +521,8 @@ function frame(ms) {
     renderer.live[key] = Math.min(1.2, Math.max(0, s.x));
   }
   renderer.live.beat = live.beat * (1 - m) + amb.beat * m;
+  renderer.fx.impact = engine.impact * (1 - m);
+  renderer.fx.age = Math.max(0, now - engine.lastImpact);
 
   while (ripples.length && now - ripples[0].born > 4.5) ripples.shift();
   renderer.setRipples(ripples, now);
@@ -1452,6 +1454,9 @@ function bindUi() {
   engine.onNote = ({ pitchClass, strength }) => spawnRipple(pitchClass, strength, performance.now() / 1000);
   engine.onBeat = () => {
     if (settings.haptics) navigator.vibrate?.(12);
+  };
+  engine.onImpact = () => {
+    if (settings.haptics) navigator.vibrate?.([30, 40, 50]);
   };
 
   new ResizeObserver(layoutView).observe(els.dock);

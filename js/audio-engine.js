@@ -16,6 +16,12 @@ export class AudioEngine {
     this.onChange = () => {};
     this.onNote = () => {};
     this.onBeat = () => {};
+    this.onImpact = () => {};
+    // A big hit: a beat that lands well above the recent loudness, like a drop after a quiet build.
+    this.impact = 0;
+    this.lastImpact = -99;
+    this.shortLevel = 0;
+    this.longLevel = 0;
     this.live = { bass: 0, mid: 0, high: 0, beat: 0, level: 0, active: false };
     this.peaks = { bass: 1e-3, mid: 1e-3, high: 1e-3 };
     this.fluxHistory = [];
@@ -274,8 +280,11 @@ export class AudioEngine {
 
     let sq = 0;
     for (let i = 0; i < this.wave.length; i++) sq += this.wave[i] * this.wave[i];
-    const rmsDb = 20 * Math.log10(Math.sqrt(sq / this.wave.length) + 1e-9);
+    const rms = Math.sqrt(sq / this.wave.length);
+    const rmsDb = 20 * Math.log10(rms + 1e-9);
     const gate = clamp01((rmsDb + 62) / 20);
+    this.shortLevel += (rms - this.shortLevel) * (1 - Math.exp(-dt / 0.12));
+    this.longLevel += (rms - this.longLevel) * (1 - Math.exp(-dt / 4));
 
     const attack = 1 - Math.exp(-dt / 0.03);
     const release = 1 - Math.exp(-dt / 0.22);
@@ -294,6 +303,13 @@ export class AudioEngine {
       live.beat = 1;
       this.lastBeat = now;
       this.onBeat();
+      const surge = this.shortLevel / (this.longLevel + 1e-4);
+      const strength = clamp01((surge - 1.3) / 1.2);
+      if (strength > 0.3 && now - this.lastImpact > 1.5) {
+        this.impact = strength;
+        this.lastImpact = now;
+        this.onImpact(strength);
+      }
     }
     pushLimited(this.lowHistory, lowFlux, 45);
 

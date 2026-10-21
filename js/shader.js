@@ -29,6 +29,7 @@ uniform vec4 uLive2;    // level, pulse (beats per second), morph surge, ripples
 uniform float uEnv[32]; // loudness over the song
 uniform vec4 uRip[12];  // ripple x, z, age, hue
 uniform float uRipStr[12];
+uniform vec4 uFx;       // the latest big hit: how hard (0..1), seconds since
 
 #define PI 3.14159265
 const float FLOOR_Y = -1.45;
@@ -105,7 +106,7 @@ float map(vec3 p) {
   float t = uTime;
   float k = influence();
   p.y -= 0.035 * sin(t * 0.9);
-  float s = 1.0 + 0.045 * uLive.w * k + 0.012 * sin(t * PI * uLive2.y);
+  float s = 1.0 + 0.045 * uLive.w * k + 0.012 * sin(t * PI * uLive2.y) + 0.07 * uFx.x * k * exp(-uFx.y * 5.0);
   p /= s;
   p.x -= uShape.w * p.y;
   p.xz = rot(uShape.z * p.y) * p.xz;
@@ -173,7 +174,7 @@ vec3 studioLights(vec3 d) {
 // A soft light behind the note in the song's colour. It breathes with the music.
 vec3 backlight(vec3 rd, float strength) {
   float b = max(dot(rd, normalize(vec3(0.0, 0.16, -1.0))), 0.0);
-  float breathe = 0.75 + 0.7 * uLive2.x * influence();
+  float breathe = 0.75 + 0.7 * uLive2.x * influence() + 2.5 * uFx.x * exp(-uFx.y * 3.0);
   return hsv(uLook.x, 0.6, 1.0) * (pow(b, 12.0) * 0.1 + pow(b, 70.0) * 0.5) * strength * breathe;
 }
 
@@ -226,6 +227,11 @@ vec2 rippleField(vec2 xz, out vec3 glow) {
   float r0 = length(xz) + 1e-4;
   float a0 = (0.006 + 0.03 * uLive.x * influence()) * exp(-r0 * 0.45);
   vec2 g = (xz / r0) * a0 * 10.0 * cos(r0 * 10.0 - uTime * 6.0);
+  // A big hit sends one strong ring out from under the note.
+  float sx = r0 - 0.4 - uFx.y * 2.2;
+  float senv = uFx.x * exp(-uFx.y * 0.9) * exp(-sx * sx * 3.0);
+  g += (xz / r0) * senv * (14.0 * cos(sx * 14.0) - 6.0 * sx * sin(sx * 14.0)) * 0.045;
+  glow += vec3(1.0) * senv * 0.3 * (0.5 + 0.5 * cos(sx * 14.0));
   if (uLive2.w < 0.5) return g;
   for (int i = 0; i < 12; i++) {
     float s = uRipStr[i];
@@ -335,6 +341,7 @@ vec3 shadeNote(vec3 p, vec3 rd) {
     c += neon * rim * (1.6 + 2.0 * uLive2.x * k + 1.5 * uLive.w * k);
   }
   c += tint * uLive.w * k * 0.12 * (0.3 + fres);
+  c += mix(vec3(1.0), tint, 0.5) * uFx.x * k * exp(-uFx.y * 5.0) * 0.5 * (0.4 + fres);
   return c;
 }
 
@@ -389,6 +396,7 @@ uniform float uEnv[32];
 uniform vec4 uRip[12];
 uniform float uRipStr[12];
 uniform vec4 uTile;     // rim angles of the song's strongest pitch and its second, and how strongly each sounds
+uniform vec4 uFx;       // the latest big hit: how hard (0..1), seconds since
 
 #define PI 3.14159265
 const vec2 TILE = vec2(0.34);
@@ -517,12 +525,37 @@ float bath(vec2 p) {
   h += (0.00015 + 0.0015 * uLive.z * k) * sin(p.x * 95.0 + t * 4.0) * sin(p.y * 88.0 - t * 3.3);
   // While a new song is being listened to, the bath churns.
   h += uLive2.z * 0.02 * sin(r * 30.0 - t * 4.0) * sin(atan(p.y, p.x) * 5.0 + t);
+  // A big hit: the transducer kicks and one strong ring races out across the bath.
+  float sx = r - uFx.y * 0.55;
+  h += uFx.x * k * 0.014 * exp(-uFx.y * 1.4) * sin(sx * 38.0) * exp(-sx * sx * 50.0);
   return h;
 }
 
-vec2 bathSlope(vec2 p) {
+// Slope (xy) and curvature (z) of the surface. Curvature is what focuses light into caustics.
+vec3 bathField(vec2 p) {
   vec2 e = vec2(0.0015, 0.0);
-  return vec2(bath(p + e.xy) - bath(p - e.xy), bath(p + e.yx) - bath(p - e.yx)) / (2.0 * e.x);
+  float c = bath(p);
+  float x0 = bath(p - e.xy);
+  float x1 = bath(p + e.xy);
+  float y0 = bath(p - e.yx);
+  float y1 = bath(p + e.yx);
+  return vec3((x1 - x0) / (2.0 * e.x), (y1 - y0) / (2.0 * e.x), (x0 + x1 + y0 + y1 - 4.0 * c) / (e.x * e.x));
+}
+
+// Caustics: light through the moving surface gathers into a web of thin bright lines on the floor.
+// The web is traced along the zero-crossings of two slowly warping wave fields; the bath's real
+// waves push it around, and the music makes it livelier and brighter.
+float caustics(vec2 p, vec2 slope) {
+  float k = uLook2.w;
+  float t = uTime * (0.6 + 0.8 * uLive2.x * k);
+  vec2 q = p * 11.0 + slope * 14.0;
+  q += vec2(sin(q.y * 0.6 + t * 0.8), cos(q.x * 0.55 - t * 0.7)) * 0.9;
+  float w1 = sin(q.x + t * 0.9) + sin(q.y * 1.1 - t * 0.7) + sin((q.x + q.y) * 0.8 + t * 0.5);
+  vec2 r = mat2(0.8, -0.6, 0.6, 0.8) * q * 1.35;
+  float w2 = sin(r.x - t * 0.6) + sin(r.y + t * 0.8);
+  float lines = pow(max(1.0 - abs(w1) / 3.0, 0.0), 8.0) + 0.7 * pow(max(1.0 - abs(w2) / 2.0, 0.0), 10.0);
+  float strength = 0.35 + 0.6 * uLive2.x * k + 0.5 * uLive.x * k + 1.2 * uFx.x * exp(-uFx.y * 2.0);
+  return lines * strength;
 }
 
 // Slope of the glass's top: flat in the middle, rounding down steeply at the rim.
@@ -621,7 +654,8 @@ void main() {
   vec2 pg = uv - tilt;
   float dT = tileDist(pg);
   float inside = smoothstep(aa, -aa, dT);
-  vec2 slope = bathSlope(uv);
+  vec3 field = bathField(uv);
+  vec2 slope = field.xy;
 
   vec3 col = backdrop(uv, scene);
   bool rig = scene == 5;
@@ -685,6 +719,14 @@ void main() {
       + C2 * floorColor(base0 + split * 0.2, blur) + C3 * floorColor(base0 - split * 0.2, blur)
       + C4 * floorColor(base0 - split * 0.6, blur) + C5 * floorColor(base0 - split * 1.0, blur))
       / (C0 + C1 + C2 + C3 + C4 + C5);
+    // Caustic light from the moving oil plays over the note and, faintly, the dark floor.
+    float caus = caustics(base0, slope);
+    float lum = dot(seen, vec3(0.333));
+    seen *= mix(1.0, 0.93 + (rig ? 0.08 : 0.14) * caus, smoothstep(0.2, 0.8, lum));
+    seen += (rig ? vec3(0.8) : vec3(0.6, 0.78, 1.0)) * caus * 0.07 * (1.0 - smoothstep(0.2, 0.6, lum));
+    // A big hit flashes light up through the glass.
+    seen += mix(vec3(1.0), tint, 0.4) * uFx.x * k * exp(-uFx.y * 6.0) * 0.22;
+
     // Where the white reaches the very edge, the glass bends its last light warm: amber into red.
     float outer = smoothstep(0.028, 0.0, inner);
     if (!rig) seen += dot(seen, vec3(0.333)) * outer * vec3(0.45, -0.25, -0.6);
@@ -720,4 +762,65 @@ void main() {
   col *= mix(scene == 1 ? 0.88 : 0.75, 1.0, vig);
   col += (hash(gl_FragCoord.xy + fract(uTime)) - 0.5) * (2.0 / 255.0);
   outColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+}`;
+
+// Glow, after the scene is drawn: the brightest light is pulled out, blurred at a ladder of sizes
+// (dual-filter down and up sampling) and laid back over the frame, like light blooming through glass.
+export const POST_DOWN = /* glsl */ `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uSrc;
+uniform vec2 uSrcTexel;
+uniform vec2 uDstSize;
+uniform float uThreshold; // below zero: plain downsample, no bright pass
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / uDstSize;
+  vec2 t = uSrcTexel;
+  vec3 c = texture(uSrc, uv).rgb * 4.0;
+  c += texture(uSrc, uv + vec2(-t.x, -t.y)).rgb;
+  c += texture(uSrc, uv + vec2(t.x, -t.y)).rgb;
+  c += texture(uSrc, uv + vec2(-t.x, t.y)).rgb;
+  c += texture(uSrc, uv + vec2(t.x, t.y)).rgb;
+  c /= 8.0;
+  if (uThreshold >= 0.0) {
+    float l = max(c.r, max(c.g, c.b));
+    float knee = 0.2;
+    float s = clamp(l - uThreshold + knee, 0.0, 2.0 * knee);
+    s = s * s / (4.0 * knee);
+    c *= max(s, l - uThreshold) / max(l, 1e-4);
+  }
+  outColor = vec4(c, 1.0);
+}`;
+
+export const POST_UP = /* glsl */ `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uSrc;
+uniform vec2 uSrcTexel;
+uniform vec2 uDstSize;
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / uDstSize;
+  vec2 t = uSrcTexel;
+  vec3 c = texture(uSrc, uv + vec2(-2.0 * t.x, 0.0)).rgb + texture(uSrc, uv + vec2(2.0 * t.x, 0.0)).rgb
+    + texture(uSrc, uv + vec2(0.0, -2.0 * t.y)).rgb + texture(uSrc, uv + vec2(0.0, 2.0 * t.y)).rgb;
+  c += 2.0 * (texture(uSrc, uv + vec2(-t.x, t.y)).rgb + texture(uSrc, uv + vec2(t.x, t.y)).rgb
+    + texture(uSrc, uv + vec2(-t.x, -t.y)).rgb + texture(uSrc, uv + vec2(t.x, -t.y)).rgb);
+  outColor = vec4(c / 12.0, 1.0);
+}`;
+
+export const POST_COMPOSITE = /* glsl */ `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uScene;
+uniform sampler2D uBloom;
+uniform vec2 uDstSize;
+uniform float uStrength;
+uniform vec3 uTint;
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / uDstSize;
+  vec3 c = texture(uScene, uv).rgb + texture(uBloom, uv).rgb * uStrength * uTint;
+  outColor = vec4(min(c, 1.0), 1.0);
 }`;
