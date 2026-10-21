@@ -168,8 +168,8 @@ export class NoteRenderer {
   // little on the light studio set, and a burst on every big hit.
   glowSettings() {
     const { view, scene } = this.look;
-    let threshold = view === 1 ? 0.75 : 0.78;
-    let strength = view === 1 ? 0.4 : 0.3;
+    let threshold = view === 1 ? 0.75 : 0.72;
+    let strength = view === 1 ? 0.4 : 0.5;
     if (scene === 1) {
       threshold = 0.92;
       strength = 0.2;

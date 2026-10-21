@@ -620,7 +620,7 @@ float oilHeight(vec2 p) {
   // A slow swell, so the surface is never perfectly flat.
   float h = 0.0022 * sin(p.x * 4.0 + t * 0.35) * sin(p.y * 3.3 - t * 0.28) + 0.0012 * sin(d * 23.0 + a * 2.0 - t * 0.7);
   // The tile hums with the music and sends rounded rings outward; the bass drives them.
-  float drive = 0.0014 + 0.006 * uLive.x * k + 0.003 * uLive2.x * k;
+  float drive = 0.0007 + 0.006 * uLive.x * uLive.x * k + 0.003 * uLive2.x * k;
   h += drive * sin(d * 48.0 - t * 4.5 + sin(a * 3.0 + t * 0.5) * 0.8) * exp(-d * 2.2);
   h += drive * 0.45 * sin(d * 95.0 - t * 8.0) * exp(-d * 6.0);
   // Each note you hear sends a ripple out from its pitch's place on the rim.
@@ -674,7 +674,7 @@ vec3 oilColor(vec2 uv, vec3 on, int scene) {
     c3 = c1;
     c4 = c2;
   }
-  return base + c1 * (sheen * 0.05 + g1 * 0.8) + c2 * g2 * 0.5 + c3 * g3 * 0.5 + c4 * g4 * 0.4;
+  return base + c1 * (sheen * 0.04 + g1 * 0.7) + c2 * g2 * 0.4 + c3 * g3 * 0.4 + c4 * g4 * 0.3;
 }
 
 vec3 backdrop(vec2 uv, int scene) {
@@ -698,6 +698,10 @@ void main() {
 
   // Tilting the view slides the glass over the deeper floor.
   vec2 tilt = vec2(sin(uCam.x), -(uCam.y - 0.12)) * 0.06;
+  // The slab rocks: with the view's tilt, and with the music, which nudges it on the bass.
+  float k0 = uLook2.w;
+  vec2 rock = tilt * 12.0 + vec2(sin(uTime * 1.3), cos(uTime * 1.05)) * (0.12 + 0.55 * uLive.x * k0)
+    + vec2(0.0, -0.6) * uFx.x * k0 * exp(-uFx.y * 2.5);
   vec2 pg = uv - tilt;
   float dT = tileDist(pg);
   float inside = smoothstep(aa, -aa, dT);
@@ -712,8 +716,12 @@ void main() {
     vec2 e = vec2(0.0015, 0.0);
     vec2 g = vec2(oilHeight(uv + e.xy) - oilHeight(uv - e.xy), oilHeight(uv + e.yx) - oilHeight(uv - e.yx)) / (2.0 * e.x);
     col = oilColor(uv, normalize(vec3(-g * 3.0, 1.0)), scene);
-    // The glass slab's own outer walls, just beyond its rim.
-    col += vec3(exp(-pow((dT - 0.016) / 0.002, 2.0)) * 0.22 + exp(-pow((dT - 0.036) / 0.0026, 2.0)) * 0.1) * ink;
+    // The glass slab's own outer walls, lower down than its top, so tilting slides them apart like a thick block.
+    float w1 = tileDist(uv - tilt * 0.55);
+    float w2 = tileDist(uv - tilt * 0.1);
+    vec2 wn = tileNormal(uv - tilt * 0.1);
+    float side = 0.6 + 0.4 * abs(wn.x) + 0.6 * max(dot(wn, normalize(vec2(-1.0, 0.3))), 0.0);
+    col += vec3(exp(-pow((w1 - 0.012) / 0.002, 2.0)) * 0.22 + exp(-pow((w2 - 0.03) / 0.0028, 2.0)) * 0.14 * side) * ink;
   }
 
   // Inside: down through the glass and the moving oil to the note on the floor.
@@ -724,7 +732,10 @@ void main() {
     // The rounded rim bends rays inward: at the very edge it shows the floor a short way in, so whatever
     // part of the note lies near the rim is drawn out along it.
     float lens = 1.0 - clamp(inner / BEVEL, 0.0, 1.0);
-    vec2 glassBend = -n * LENS_REACH * pow(lens, 1.3);
+    // The side tipping toward you shows more of the floor and the far side less, so as the slab rocks,
+    // the white the rim pulls out sloshes around it.
+    float lean = clamp(1.0 + 1.3 * dot(n, rock), 0.35, 2.2);
+    vec2 glassBend = -n * LENS_REACH * pow(lens, 1.3) * lean;
     float depth = 0.1 + 0.12 * uSurf.w;
     vec2 bathBend = -slope * depth * 0.22;
     vec2 base = uv + tilt * 0.6;
