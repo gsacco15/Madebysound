@@ -459,11 +459,12 @@ async function pollSpotify() {
 
 // ---------- Ripples and ambient motion ----------
 
-function spawnRipple(pitchClass, strength, now) {
+// pitch is how high the note sounded, 0 (low) to 1 (high): low notes ripple broad, high notes tight.
+function spawnRipple(pitchClass, strength, now, pitch = 0.5) {
   if (!settings.ripples) return;
   const angle = (fifthsPosition(pitchClass) / 12) * Math.PI * 2;
   const radius = 1.75 + Math.random() * 0.45;
-  ripples.push({ x: Math.sin(angle) * radius, z: Math.cos(angle) * radius * 0.85 + 0.25, born: now, hue: pitchHue(pitchClass), strength });
+  ripples.push({ x: Math.sin(angle) * radius, z: Math.cos(angle) * radius * 0.85 + 0.25, born: now, hue: pitchHue(pitchClass), strength, pitch });
   if (ripples.length > 12) ripples.shift();
 }
 
@@ -523,6 +524,7 @@ function frame(ms) {
   renderer.live.beat = live.beat * (1 - m) + amb.beat * m;
   renderer.fx.impact = engine.impact * (1 - m);
   renderer.fx.age = Math.max(0, now - engine.lastImpact);
+  renderer.fx.tension = engine.tension * (1 - m);
 
   while (ripples.length && now - ripples[0].born > 4.5) ripples.shift();
   renderer.setRipples(ripples, now);
@@ -1451,7 +1453,7 @@ function bindUi() {
   window.addEventListener('hashchange', () => openShared(location.hash.slice(1)));
 
   engine.onChange = syncTransport;
-  engine.onNote = ({ pitchClass, strength }) => spawnRipple(pitchClass, strength, performance.now() / 1000);
+  engine.onNote = ({ pitchClass, strength, height }) => spawnRipple(pitchClass, strength, performance.now() / 1000, height);
   engine.onBeat = () => {
     if (settings.haptics) navigator.vibrate?.(12);
   };

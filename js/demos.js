@@ -7,7 +7,7 @@ const midiHz = (m) => 440 * 2 ** ((m - 69) / 12);
 export const DEMOS = [
   { id: 'glass-lullaby', title: 'Glass Lullaby', bpm: 76, bars: 8, mood: 'Soft bells over warm chords', compose: lullaby },
   { id: 'night-drive', title: 'Night Drive', bpm: 112, bars: 8, mood: 'Four-on-the-floor synth bass', compose: nightDrive },
-  { id: 'bright-rush', title: 'Bright Rush', bpm: 150, bars: 12, mood: 'Fast arpeggios and sixteenth hats', compose: brightRush },
+  { id: 'bright-rush', title: 'Bright Rush', bpm: 150, bars: 12, mood: 'Fast arpeggios, a breakdown and a drop', compose: brightRush },
 ];
 
 const cache = new Map();
@@ -114,6 +114,36 @@ function clap(s, t, peak = 0.35) {
   src.stop(t + 0.22);
 }
 
+// A crash cymbal: a long wash of bright noise.
+function crash(s, t, peak = 0.3) {
+  const src = s.ctx.createBufferSource();
+  src.buffer = s.noise;
+  src.loop = true;
+  const g = envGain(s.ctx, t, peak, 0.002, 1.6);
+  src.connect(g).connect(s.hatBus);
+  send(s, g, 0.4);
+  src.start(t);
+  src.stop(t + 1.65);
+}
+
+// A noise sweep that rises into a drop and cuts off right on it.
+function riser(s, t, length, peak = 0.06) {
+  const src = s.ctx.createBufferSource();
+  src.buffer = s.noise;
+  src.loop = true;
+  const bp = s.ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.Q.value = 1.2;
+  bp.frequency.setValueAtTime(500, t);
+  bp.frequency.exponentialRampToValueAtTime(7000, t + length);
+  const g = s.ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(peak, t + length);
+  src.connect(bp).connect(g).connect(s.out);
+  src.start(t);
+  src.stop(t + length);
+}
+
 function tone(s, t, midi, length, { type = 'sine', peak = 0.15, attack = 0.01, cutoff = 0, detune = 0, reverb = 0 } = {}) {
   const o = s.ctx.createOscillator();
   o.type = type;
@@ -188,26 +218,30 @@ function nightDrive(s) {
   });
 }
 
-// F♯ major, I–vi–IV–V at 150 BPM. Sixteenth hats and bright plucked arpeggios.
+// F♯ major, I–vi–IV–V at 150 BPM. Sixteenth hats and bright plucked arpeggios. Bars 7 and 8 drop
+// the drums and bass and build back up, and bar 9 lands the drop.
 function brightRush(s) {
   const chords = [[54, 58, 61], [51, 54, 58], [47, 51, 54], [49, 53, 56]];
   const roots = [42, 39, 47, 37];
   eachBar(s, 12, (bar, t0) => {
     const c = bar % 4;
     pad(s, t0, chords[c].map((m) => m + 12), 4 * s.beat, 0.018, 'sawtooth');
+    if (bar === 7) riser(s, t0, 4 * s.beat);
+    if (bar === 8) crash(s, t0);
+    const breakdown = bar === 6 || bar === 7;
+    for (let i = 0; i < 16; i++) {
+      const arp = [0, 1, 2, 1];
+      const m = chords[c][arp[i % 4]] + 24 + (i >= 8 ? 12 : 0);
+      tone(s, t0 + i * s.beat * 0.25, m, s.beat * 0.22, { type: 'sawtooth', peak: breakdown ? 0.025 : 0.035, cutoff: 2600, reverb: 0.3 });
+    }
+    if (breakdown) return;
     for (let b = 0; b < 4; b++) {
       const t = t0 + b * s.beat;
       if (b === 0 || b === 2) kick(s, t, 0.8);
       if (b === 3) kick(s, t + s.beat * 0.5, 0.55);
       if (b % 2 === 1) clap(s, t, 0.28);
     }
-    for (let i = 0; i < 16; i++) {
-      const t = t0 + i * s.beat * 0.25;
-      hat(s, t, i % 4 === 2 ? 0.1 : 0.05, 0.035);
-      const arp = [0, 1, 2, 1];
-      const m = chords[c][arp[i % 4]] + 24 + (i >= 8 ? 12 : 0);
-      tone(s, t, m, s.beat * 0.22, { type: 'sawtooth', peak: 0.035, cutoff: 2600, reverb: 0.3 });
-    }
+    for (let i = 0; i < 16; i++) hat(s, t0 + i * s.beat * 0.25, i % 4 === 2 ? 0.1 : 0.05, 0.035);
     for (let e = 0; e < 4; e++) tone(s, t0 + e * s.beat, roots[c], s.beat * 0.8, { type: 'triangle', peak: 0.2, cutoff: 600 });
   });
 }

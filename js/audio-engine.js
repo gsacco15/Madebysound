@@ -23,6 +23,13 @@ export class AudioEngine {
     this.shortLevel = 0;
     this.longLevel = 0;
     this.activeSince = -1;
+    // A build-up (0..1): grows while the bass is out and the music carries on, and is released by the drop.
+    this.tension = 0;
+    this.bassShort = 0;
+    this.bassLong = 0;
+    this.highShort = 0;
+    this.highLong = 0;
+    this.beatGap = 0.6;
     this.live = { bass: 0, mid: 0, high: 0, beat: 0, level: 0, active: false };
     this.peaks = { bass: 1e-3, mid: 1e-3, high: 1e-3 };
     this.fluxHistory = [];
@@ -244,6 +251,7 @@ export class AudioEngine {
     live.active = !!this.ctx && (this.playing || this.listening);
     if (!live.active) {
       this.activeSince = -1;
+      this.tension = 0;
       const fade = Math.exp(-dt * 3);
       live.bass *= fade;
       live.mid *= fade;
@@ -262,6 +270,9 @@ export class AudioEngine {
     let high = 0;
     let flux = 0;
     let lowFlux = 0;
+    // Where in pitch the new energy is, weighted equally per octave: low for a bass note, high for a bell.
+    let newLog = 0;
+    let newWeight = 0;
     const chroma = new Float32Array(12);
     for (let k = 1; k < this.freq.length; k++) {
       const db = this.freq[k];
@@ -276,6 +287,10 @@ export class AudioEngine {
       if (d > 0 && f < 6000) {
         flux += d;
         if (f < 180) lowFlux += d;
+        if (f > 50 && f < 4000) {
+          newLog += (d / f) * Math.log2(f);
+          newWeight += d / f;
+        }
       }
       const pc = this.binPitch[k];
       if (pc >= 0) chroma[pc] += m * m;
@@ -289,6 +304,21 @@ export class AudioEngine {
     this.shortLevel += (rms - this.shortLevel) * (1 - Math.exp(-dt / 0.12));
     // Over the first seconds the long level averages everything heard so far, so it settles quickly.
     this.longLevel += (rms - this.longLevel) * (1 - Math.exp(-dt / Math.min(4, 0.3 + now - this.activeSince)));
+    // Until the long level has settled, every beat would look like a surge.
+    const settled = now - this.activeSince > 3;
+
+    // A build-up: the beat stops for well over this song's usual gap and the bass drops away, while the
+    // music carries on. Tension grows the longer that lasts, twice as fast while the top end is rising,
+    // and eases off if the beat simply comes back without a drop.
+    this.bassShort += (bass - this.bassShort) * (1 - Math.exp(-dt / 0.6));
+    this.bassLong += (bass - this.bassLong) * (1 - Math.exp(-dt / 12));
+    this.highShort += (high - this.highShort) * (1 - Math.exp(-dt / 0.5));
+    this.highLong += (high - this.highLong) * (1 - Math.exp(-dt / 4));
+    const beatless = now - this.lastBeat > Math.max(1.2, this.beatGap * 2.5);
+    const bassOut = settled && gate > 0.3 && beatless && this.bassShort < this.bassLong * 0.5;
+    const rising = this.highShort > this.highLong * 1.3;
+    if (bassOut) this.tension = Math.min(1, this.tension + (dt / 2) * (rising ? 2 : 1));
+    else this.tension = Math.max(0, this.tension - dt / 1.5);
 
     const attack = 1 - Math.exp(-dt / 0.03);
     const release = 1 - Math.exp(-dt / 0.22);
@@ -305,15 +335,19 @@ export class AudioEngine {
     const lowMean = mean(this.lowHistory);
     if (gate > 0.2 && lowFlux > lowMean * 1.7 + 0.4 && now - this.lastBeat > 0.25) {
       live.beat = 1;
+      const gap = now - this.lastBeat;
+      if (gap < 4) this.beatGap += (gap - this.beatGap) * 0.2;
       this.lastBeat = now;
       this.onBeat();
       const surge = this.shortLevel / (this.longLevel + 1e-4);
-      const strength = clamp01((surge - 1.3) / 1.2);
-      // Until the long level has settled, every beat would look like a surge.
-      const settled = now - this.activeSince > 3;
+      // After a build-up, the beat that brings the bass back is the drop, however loud it is.
+      const strength = Math.max(clamp01((surge - 1.6) / 1.2), this.tension > 0.3 ? Math.min(1, 0.5 + this.tension) : 0);
       if (settled && strength > 0.3 && now - this.lastImpact > 1.5) {
         this.impact = strength;
         this.lastImpact = now;
+        this.tension = 0;
+        // The music is loud again, so let the long level catch up; the bars after a drop aren't new hits.
+        this.longLevel = Math.max(this.longLevel, this.shortLevel, rms * 0.7);
         this.onImpact(strength);
       }
     }
@@ -328,7 +362,9 @@ export class AudioEngine {
         total += chroma[i];
         if (chroma[i] > chroma[pc]) pc = i;
       }
-      if (total > 0) this.onNote({ pitchClass: pc, strength: clamp01(0.45 + (flux / (fluxMean * 3 + 1e-3)) * 0.4) });
+      // Height 0 is about 55 Hz (a low A), 1 is about 4 kHz.
+      const height = newWeight > 0 ? clamp01((newLog / newWeight - Math.log2(55)) / Math.log2(4000 / 55)) : 0.5;
+      if (total > 0) this.onNote({ pitchClass: pc, height, strength: clamp01(0.45 + (flux / (fluxMean * 3 + 1e-3)) * 0.4) });
     }
     pushLimited(this.fluxHistory, flux, 45);
     return live;

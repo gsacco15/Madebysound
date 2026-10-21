@@ -27,7 +27,7 @@ export const SCENES = [
 
 const UNIFORMS = [
   'uRes', 'uTime', 'uCam', 'uShift', 'uZoom', 'uH1', 'uH2', 'uS1', 'uS2', 'uBeam', 'uBeam2', 'uShape', 'uSurf', 'uLook',
-  'uLook2', 'uLive', 'uLive2', 'uEnv', 'uRip', 'uRipStr', 'uTile', 'uFx',
+  'uLook2', 'uLive', 'uLive2', 'uEnv', 'uRip', 'uRipStr', 'uRipPitch', 'uTile', 'uFx',
 ];
 const POST_UNIFORMS = ['uSrc', 'uSrcTexel', 'uDstSize', 'uThreshold', 'uScene', 'uBloom', 'uStrength', 'uTint'];
 
@@ -85,8 +85,8 @@ export class NoteRenderer {
     this.morphStart = 0;
     this.morphDuration = 1.6;
     this.live = { bass: 0, mid: 0, high: 0, beat: 0, level: 0 };
-    // The latest big hit: how hard it landed (0..1) and how many seconds ago.
-    this.fx = { impact: 0, age: 99 };
+    // The latest big hit: how hard it landed (0..1) and how many seconds ago; and a build-up's tension (0..1).
+    this.fx = { impact: 0, age: 99, tension: 0 };
     this.look = { view: 0, material: 0, scene: 0, influence: 0.7, ripples: true };
     this.camera = { yaw: 0, pitch: 0.12, zoom: 1 };
     this.shift = [0, 0];
@@ -94,6 +94,7 @@ export class NoteRenderer {
     this.moltenTarget = 0;
     this.ripples = new Float32Array(MAX_RIPPLES * 4);
     this.rippleStrength = new Float32Array(MAX_RIPPLES);
+    this.ripplePitch = new Float32Array(MAX_RIPPLES);
     this.scale = 1;
     this.maxDpr = 1.5;
     this.avgFrame = 16;
@@ -179,7 +180,7 @@ export class NoteRenderer {
       threshold = 0.85;
       strength = 0.22;
     }
-    strength += this.fx.impact * 0.45 * Math.exp(-this.fx.age * 3);
+    strength += (this.fx.impact * Math.exp(-this.fx.age * 2.5) + this.fx.tension * 0.25) * (view === 1 ? 0.5 : 1);
     return { threshold, strength };
   }
 
@@ -270,6 +271,7 @@ export class NoteRenderer {
     list.slice(-MAX_RIPPLES).forEach((r, i) => {
       this.ripples.set([r.x, r.z, now - r.born, r.hue], i * 4);
       this.rippleStrength[i] = r.strength;
+      this.ripplePitch[i] = r.pitch ?? 0.5;
     });
   }
 
@@ -324,7 +326,9 @@ export class NoteRenderer {
     gl.uniform1f(u.uTime, time);
     gl.uniform3f(u.uCam, this.camera.yaw, this.camera.pitch, distance);
     gl.uniform2f(u.uShift, shift[0], shift[1]);
-    gl.uniform1f(u.uZoom, this.camera.zoom * Math.min(1, aspect / 0.95));
+    // A big hit punches the view in a little.
+    const punch = 1 + 0.035 * this.fx.impact * this.look.influence * Math.exp(-this.fx.age * 5);
+    gl.uniform1f(u.uZoom, this.camera.zoom * Math.min(1, aspect / 0.95) * punch);
     gl.uniform4fv(u.uH1, geo.H1);
     gl.uniform4fv(u.uH2, geo.H2);
     gl.uniform4fv(u.uS1, geo.S1);
@@ -339,9 +343,10 @@ export class NoteRenderer {
     gl.uniform4f(u.uLive2, this.live.level, p.pulse, surge, this.look.ripples ? 1 : 0);
     gl.uniform1fv(u.uEnv, p.envelope);
     gl.uniform4f(u.uTile, p.rimA * Math.PI * 2, p.rimB * Math.PI * 2, p.pullA, p.pullB);
-    gl.uniform4f(u.uFx, this.fx.impact, this.fx.age, 0, 0);
+    gl.uniform4f(u.uFx, this.fx.impact, this.fx.age, this.fx.tension, 0);
     gl.uniform4fv(u.uRip, this.ripples);
     gl.uniform1fv(u.uRipStr, this.rippleStrength);
+    gl.uniform1fv(u.uRipPitch, this.ripplePitch);
     gl.bindVertexArray(this.vao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }

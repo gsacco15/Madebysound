@@ -29,7 +29,8 @@ uniform vec4 uLive2;    // level, pulse (beats per second), morph surge, ripples
 uniform float uEnv[32]; // loudness over the song
 uniform vec4 uRip[12];  // ripple x, z, age, hue
 uniform float uRipStr[12];
-uniform vec4 uFx;       // the latest big hit: how hard (0..1), seconds since
+uniform float uRipPitch[12]; // how high each ripple's note was, 0 (low) to 1 (high)
+uniform vec4 uFx;       // the latest big hit: how hard (0..1), seconds since; then a build-up's tension (0..1)
 
 #define PI 3.14159265
 const float FLOOR_Y = -1.45;
@@ -106,7 +107,7 @@ float map(vec3 p) {
   float t = uTime;
   float k = influence();
   p.y -= 0.035 * sin(t * 0.9);
-  float s = 1.0 + 0.045 * uLive.w * k + 0.012 * sin(t * PI * uLive2.y) + 0.07 * uFx.x * k * exp(-uFx.y * 5.0);
+  float s = 1.0 + 0.045 * uLive.w * k + 0.012 * sin(t * PI * uLive2.y) + 0.12 * uFx.x * k * exp(-uFx.y * 5.0);
   p /= s;
   p.x -= uShape.w * p.y;
   p.xz = rot(uShape.z * p.y) * p.xz;
@@ -174,7 +175,7 @@ vec3 studioLights(vec3 d) {
 // A soft light behind the note in the song's colour. It breathes with the music.
 vec3 backlight(vec3 rd, float strength) {
   float b = max(dot(rd, normalize(vec3(0.0, 0.16, -1.0))), 0.0);
-  float breathe = 0.75 + 0.7 * uLive2.x * influence() + 2.5 * uFx.x * exp(-uFx.y * 3.0);
+  float breathe = 0.75 + 0.7 * uLive2.x * influence() + 2.5 * uFx.x * exp(-uFx.y * 3.0) + 1.2 * uFx.z * influence();
   return hsv(uLook.x, 0.6, 1.0) * (pow(b, 12.0) * 0.1 + pow(b, 70.0) * 0.5) * strength * breathe;
 }
 
@@ -230,7 +231,7 @@ vec2 rippleField(vec2 xz, out vec3 glow) {
   // A big hit sends one strong ring out from under the note.
   float sx = r0 - 0.4 - uFx.y * 2.2;
   float senv = uFx.x * exp(-uFx.y * 0.9) * exp(-sx * sx * 3.0);
-  g += (xz / r0) * senv * (14.0 * cos(sx * 14.0) - 6.0 * sx * sin(sx * 14.0)) * 0.045;
+  g += (xz / r0) * senv * (14.0 * cos(sx * 14.0) - 6.0 * sx * sin(sx * 14.0)) * 0.07;
   if (uLive2.w < 0.5) return g;
   for (int i = 0; i < 12; i++) {
     float s = uRipStr[i];
@@ -240,7 +241,8 @@ vec2 rippleField(vec2 xz, out vec3 glow) {
     float d = length(dv) + 1e-4;
     float x = d - r.z * 1.5;
     float env = exp(-x * x * 2.2) * exp(-r.z * 0.8) * s;
-    float w = 13.0;
+    // Low notes ripple broad, high notes tight.
+    float w = mix(8.0, 22.0, uRipPitch[i]);
     g += (dv / d) * env * (w * cos(x * w) - 4.4 * x * sin(x * w)) * 0.02;
     glow += hsv(r.w, 0.75, 1.0) * env * (0.5 + 0.5 * cos(x * w));
   }
@@ -339,7 +341,7 @@ vec3 shadeNote(vec3 p, vec3 rd) {
     c += neon * rim * (1.6 + 2.0 * uLive2.x * k + 1.5 * uLive.w * k);
   }
   c += tint * uLive.w * k * 0.12 * (0.3 + fres);
-  c += mix(vec3(1.0), tint, 0.5) * uFx.x * k * exp(-uFx.y * 5.0) * 0.5 * (0.4 + fres);
+  c += mix(vec3(1.0), tint, 0.5) * uFx.x * k * exp(-uFx.y * 5.0) * 0.7 * (0.4 + fres);
   return c;
 }
 
@@ -393,8 +395,9 @@ uniform vec4 uLive2;
 uniform float uEnv[32];
 uniform vec4 uRip[12];
 uniform float uRipStr[12];
+uniform float uRipPitch[12];
 uniform vec4 uTile;     // rim angles of the song's strongest pitch and its second, and how strongly each sounds
-uniform vec4 uFx;       // the latest big hit: how hard (0..1), seconds since
+uniform vec4 uFx;       // the latest big hit: how hard (0..1), seconds since; then a build-up's tension (0..1)
 
 #define PI 3.14159265
 const vec2 TILE = vec2(0.34);
@@ -512,19 +515,25 @@ float bath(vec2 p) {
   h += wave(p, vec2(0.0), 36.0 + 36.0 * fract(uTile.y / (2.0 * PI)), 3.4, level * uTile.w * 12.0);
   // The song's frozen ripples, a slow standing pattern.
   h += uSurf.y * 0.06 * sin(r * uSurf.x * 3.0) * cos(t * 0.6);
-  // Each note you hear sends a ring out from the middle.
+  // Each note you hear sends a ring out from the middle. Low notes send broad, slow waves that carry far;
+  // high notes send tight, quick ones that fade sooner.
   for (int i = 0; i < 12; i++) {
     float s = uRipStr[i];
     if (s <= 0.0) continue;
-    float x = r - uRip[i].z * 0.3;
-    h += s * 0.006 * exp(-uRip[i].z * 1.6) * sin(x * 70.0) * exp(-x * x * 300.0);
+    float pitch = uRipPitch[i];
+    float kw = mix(32.0, 130.0, pitch);
+    float age = uRip[i].z;
+    float x = r - age * mix(0.24, 0.36, pitch);
+    h += s * (0.42 / kw) * exp(-age * mix(1.1, 2.6, pitch)) * sin(x * kw) * exp(-x * x * kw * kw * 0.06);
   }
   h += shimmer(p);
   // While a new song is being listened to, the bath churns.
   h += uLive2.z * 0.02 * sin(r * 30.0 - t * 4.0) * sin(atan(p.y, p.x) * 5.0 + t);
-  // A big hit: the transducer kicks and one strong ring races out across the bath.
+  // A build-up: rings gather in toward the middle, stronger as the tension grows.
+  h += uFx.z * k * 0.004 * sin(r * 60.0 + t * 7.0) * smoothstep(0.0, 0.1, r);
+  // A big hit: the transducer kicks and a train of strong rings races out across the bath.
   float sx = r - uFx.y * 0.55;
-  h += uFx.x * k * 0.014 * exp(-uFx.y * 1.4) * sin(sx * 38.0) * exp(-sx * sx * 50.0);
+  h += uFx.x * k * 0.026 * exp(-uFx.y * 1.4) * sin(sx * 38.0) * exp(-sx * sx * 25.0);
   return h;
 }
 
@@ -619,13 +628,18 @@ float oilHeight(vec2 p) {
   for (int i = 0; i < 12; i++) {
     float s = uRipStr[i];
     if (s <= 0.0) continue;
+    float pitch = uRipPitch[i];
+    float kw = mix(32.0, 130.0, pitch);
+    float speed = mix(0.24, 0.36, pitch);
     float age = uRip[i].z;
-    float x = d + 0.34 - age * 0.3;
-    h += s * 0.005 * exp(-max(age - 1.0, 0.0) * 1.2) * sin(x * 70.0) * exp(-x * x * 120.0);
+    float x = d + 0.34 - age * speed;
+    h += s * (0.35 / kw) * exp(-max(age - 0.34 / speed, 0.0) * mix(1.0, 2.4, pitch)) * sin(x * kw) * exp(-x * x * kw * kw * 0.025);
   }
-  // A big hit: one strong wave rolls out from the tile.
+  // A build-up: rings gather in toward the tile.
+  h += uFx.z * k * 0.003 * sin(d * 50.0 + t * 6.0) * exp(-d * 2.0);
+  // A big hit: a train of strong waves rolls out from the tile.
   float sx = d - uFx.y * 0.5;
-  h += uFx.x * k * 0.012 * exp(-uFx.y * 1.1) * sin(sx * 40.0) * exp(-sx * sx * 40.0);
+  h += uFx.x * k * 0.024 * exp(-uFx.y * 1.1) * sin(sx * 40.0) * exp(-sx * sx * 25.0);
   return h;
 }
 
@@ -689,10 +703,15 @@ void main() {
 
   // Tilting the view slides the glass over the deeper floor.
   vec2 tilt = vec2(sin(uCam.x), -(uCam.y - 0.12)) * 0.06;
-  // The slab rocks: with the view's tilt, and with the music, which nudges it on the bass.
-  float k0 = uLook2.w;
-  vec2 rock = tilt * 12.0 + vec2(sin(uTime * 1.3), cos(uTime * 1.05)) * (0.12 + 0.55 * uLive.x * k0)
-    + vec2(0.0, -0.6) * uFx.x * k0 * exp(-uFx.y * 2.5);
+  // The latest big hit, and how long ago it landed; and the tension of a build-up in progress.
+  float hit = uFx.x * k;
+  float since = uFx.y;
+  float tense = uFx.z * k;
+  // The slab rocks: with the view's tilt, with the music, which nudges it on the bass, and hard on a big
+  // hit, rocking back and forth as it settles. During a build-up it trembles, more as the tension grows.
+  vec2 rock = tilt * 12.0 + vec2(sin(uTime * 1.3), cos(uTime * 1.05)) * (0.12 + 0.55 * uLive.x * k)
+    + vec2(0.35, -1.3) * hit * cos(since * 7.0) * exp(-since * 2.2)
+    + vec2(sin(uTime * 31.0), cos(uTime * 27.0)) * 0.35 * tense * tense;
   vec2 pg = uv - tilt;
   float dT = tileDist(pg);
   float inside = smoothstep(aa, -aa, dT);
@@ -706,7 +725,8 @@ void main() {
   if (dT > -aa && scene != 3) {
     vec2 e = vec2(0.0015, 0.0);
     vec2 g = vec2(oilHeight(uv + e.xy) - oilHeight(uv - e.xy), oilHeight(uv + e.yx) - oilHeight(uv - e.yx)) / (2.0 * e.x);
-    col = oilColor(uv, normalize(vec3(-g * 3.0, 1.0)), scene);
+    // During a build-up the oil around the tile darkens, so the drop lands against the dark.
+    col = oilColor(uv, normalize(vec3(-g * 3.0, 1.0)), scene) * (1.0 - 0.35 * tense);
     // The glass slab's own outer walls, lower down than its top, so tilting slides them apart like a thick block.
     float w1 = tileDist(uv - tilt * 0.55);
     float w2 = tileDist(uv - tilt * 0.1);
@@ -731,7 +751,7 @@ void main() {
     vec2 bathBend = -slope * depth * 0.22;
     vec2 base = uv + tilt * 0.6;
     // The glass splits colour far more than the thin oil does.
-    float glassSpread = rig ? 0.015 : 0.15 + uLook2.x * 1.5 + 0.06 * uLive.z * k;
+    float glassSpread = rig ? 0.015 : 0.15 + uLook2.x * 1.5 + 0.06 * uLive.z * k + 1.5 * hit * exp(-since * 2.5);
     float bathSpread = rig ? 0.01 : 0.05 + 0.05 * uLive.z * k;
     float blur = mat == 1 ? aa * 6.0 + 0.004 : aa * 1.2;
     // Six wavelengths from deep blue to red, each bent by its own amount.
@@ -741,7 +761,10 @@ void main() {
     const vec3 C3 = vec3(1.0, 0.95, 0.3);
     const vec3 C4 = vec3(1.0, 0.45, 0.1);
     const vec3 C5 = vec3(1.0, 0.1, 0.3);
-    vec2 base0 = base + glassBend + bathBend;
+    // A big hit heaves the oil up in the middle. The bulge acts as a lens, so the note swells and wobbles
+    // as it settles.
+    float heave = 0.12 * hit * cos(since * 11.0) * exp(-since * 3.0);
+    vec2 base0 = base + glassBend + bathBend - base * heave * exp(-dot(base, base) * 5.0);
     vec2 split = glassBend * glassSpread + bathBend * bathSpread;
     vec3 seen = (C0 * floorColor(base0 + split * 1.0, blur) + C1 * floorColor(base0 + split * 0.6, blur)
       + C2 * floorColor(base0 + split * 0.2, blur) + C3 * floorColor(base0 - split * 0.2, blur)
@@ -749,8 +772,9 @@ void main() {
       / (C0 + C1 + C2 + C3 + C4 + C5);
     // Caustic light from the moving oil plays over the note. The black floor absorbs it, so none shows there.
     seen *= 1.0 + caustics(field.z) * (rig ? 0.35 : 1.0);
-    // A big hit flashes light up through the glass.
-    seen += mix(vec3(1.0), tint, 0.4) * uFx.x * k * exp(-uFx.y * 6.0) * 0.22;
+    // A big hit flashes light up through the glass: the white flares and the black barely lifts.
+    float flash = hit * exp(-since * 6.0);
+    seen = seen * (1.0 + 0.6 * flash) + mix(vec3(1.0), tint, 0.4) * flash * 0.05;
 
     // Where the white reaches the very edge, the glass bends its last light warm: amber into red.
     float outer = smoothstep(0.028, 0.0, inner);
@@ -773,7 +797,9 @@ void main() {
 
   // The rim itself: a bright edge and an inner line where the rounding starts.
   vec3 rimTint = rig ? vec3(0.8) : mix(vec3(1.0), 0.5 + 0.5 * cos(2.0 * PI * (vec3(0.0, 0.33, 0.67) + rimAngle(pg) / (2.0 * PI) + uLook.x)), 0.55);
-  col += rimTint * exp(-pow(dT / 0.0022, 2.0)) * 0.9 * (scene == 1 ? 0.6 : 1.0);
+  // It brightens as a build-up grows and flares on the drop.
+  float rimBoost = 1.0 + 1.5 * tense + 2.0 * hit * exp(-since * 4.0);
+  col += rimTint * exp(-pow(dT / 0.0022, 2.0)) * 0.9 * (scene == 1 ? 0.6 : 1.0) * rimBoost;
   col += vec3(0.18) * exp(-pow((dT + BEVEL) / 0.002, 2.0));
   if (rig) {
     // The dish's thick outer wall: clear glass with bright lines along its faces.
