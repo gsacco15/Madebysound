@@ -37,6 +37,11 @@ export function keepNote(entry) {
   return persist(list) ? list : null;
 }
 
+export function setFavorite(id, favorite) {
+  const list = loadCollection().map((e) => (e.id === id ? { ...e, favorite } : e));
+  return persist(list) ? list : null;
+}
+
 export function removeNote(id) {
   const list = loadCollection().filter((e) => e.id !== id);
   return persist(list) ? list : null;

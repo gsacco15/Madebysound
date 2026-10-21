@@ -17,9 +17,13 @@ function between(start, end) {
   return html.slice(a + start.length, b).trim();
 }
 
+// Share links must point at the artifact's claude.ai address, which the page can't see from inside its frame.
+const shareBase = process.env.ARTIFACT_URL;
+
 const page = [
   between('<!-- APP:HEAD -->', '<!-- APP:END-HEAD -->'),
   '<meta name="claude:viewport-fit-sides" content="cover">',
+  shareBase ? `<meta name="mbs-share-base" content="${shareBase}">` : '',
   `<style>\n${css}</style>`,
   between('<!-- APP:BODY -->', '<!-- APP:END-BODY -->'),
   '<script type="module" src="js/main.js"></script>',

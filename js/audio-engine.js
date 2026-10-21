@@ -15,6 +15,7 @@ export class AudioEngine {
     this.micNode = null;
     this.onChange = () => {};
     this.onNote = () => {};
+    this.onBeat = () => {};
     this.live = { bass: 0, mid: 0, high: 0, beat: 0, level: 0, active: false };
     this.peaks = { bass: 1e-3, mid: 1e-3, high: 1e-3 };
     this.fluxHistory = [];
@@ -193,6 +194,31 @@ export class AudioEngine {
     return this.decode(await blob.arrayBuffer());
   }
 
+  // A soft glass arpeggio on the song's tonic chord, played when a new note is revealed.
+  chime(tonic, mode) {
+    if (!this.ctx || this.ctx.state !== 'running') return;
+    const ctx = this.ctx;
+    const out = ctx.createGain();
+    out.gain.value = 0.05;
+    out.connect(ctx.destination);
+    const start = ctx.currentTime + 0.03;
+    [0, mode === 'minor' ? 3 : 4, 7, 12].forEach((step, i) => {
+      const t = start + i * 0.085;
+      const f = 440 * 2 ** ((72 + tonic + step - 69) / 12);
+      for (const [ratio, level, decay] of [[1, 1, 2.4], [2.76, 0.25, 0.6], [5.4, 0.08, 0.25]]) {
+        const o = ctx.createOscillator();
+        o.frequency.value = f * ratio;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(level, t + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+        o.connect(g).connect(out);
+        o.start(t);
+        o.stop(t + decay + 0.05);
+      }
+    });
+  }
+
   // A stream of what is playing, for recording video clips.
   audioStream() {
     const ctx = this.unlock();
@@ -267,6 +293,7 @@ export class AudioEngine {
     if (gate > 0.2 && lowFlux > lowMean * 1.7 + 0.4 && now - this.lastBeat > 0.25) {
       live.beat = 1;
       this.lastBeat = now;
+      this.onBeat();
     }
     pushLimited(this.lowHistory, lowFlux, 45);
 

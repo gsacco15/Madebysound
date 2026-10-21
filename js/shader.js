@@ -198,6 +198,25 @@ vec3 sky(vec3 rd, bool primary) {
     return c + lights * 0.6;
   }
   if (scene == 3) return vec3(0.004, 0.004, 0.006) + lights + backlight(rd, 0.3);
+  if (scene == 4) {
+    // Neon club: tubes in the song's two colours behind the note, pulsing with the level.
+    float az = atan(rd.x, rd.z);
+    float behind = az > 0.0 ? az - PI : az + PI;
+    float pulse = 0.8 + 0.6 * uLive2.x * influence() + 0.5 * uLive.w * influence();
+    float span = smoothstep(0.62, 0.55, abs(behind));
+    float d1 = abs(y - 0.24);
+    float d2 = abs(y - 0.02);
+    float dv = abs(abs(behind) - 0.58);
+    float vspan = smoothstep(-0.08, -0.04, y) * smoothstep(0.32, 0.28, y);
+    vec3 a = hsv(uLook.x, 0.85, 1.0);
+    vec3 b = hsv(uLook.y, 0.85, 1.0);
+    vec3 c = vec3(0.006, 0.004, 0.012);
+    c += a * span * (exp(-pow(d1 / 0.004, 2.0)) * 4.0 + exp(-pow(d1 / 0.035, 2.0)) * 0.35) * pulse;
+    c += b * span * (exp(-pow(d2 / 0.004, 2.0)) * 3.0 + exp(-pow(d2 / 0.03, 2.0)) * 0.25) * pulse;
+    c += mix(a, b, 0.5) * vspan * (exp(-pow(dv / 0.004, 2.0)) * 3.0 + exp(-pow(dv / 0.03, 2.0)) * 0.25) * pulse;
+    c += a * 0.03 * exp(-abs(y - 0.15) * 5.0);
+    return c + lights * 0.35 * mix(vec3(1.0), a, 0.5);
+  }
   return mix(vec3(0.008, 0.009, 0.013), vec3(0.03, 0.034, 0.048), smoothstep(-0.05, 0.5, y)) + lights + backlight(rd, 1.0);
 }
 
@@ -243,7 +262,7 @@ vec3 floorShade(vec3 ro, vec3 rd, float t) {
     col += glow * 0.22;
   } else {
     col = vec3(0.003, 0.004, 0.006) + refl * fres * (0.4 + 0.6 * shade);
-    col += glow * 0.24;
+    col += glow * (scene == 4 ? 0.4 : 0.24);
   }
   return mix(col, sky(rd, false), smoothstep(10.0, 40.0, t));
 }

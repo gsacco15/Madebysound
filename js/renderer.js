@@ -1,6 +1,7 @@
 // WebGL2 host for the glass-note shader: DNA → uniforms, morphing between notes, snapshots.
 
 import { VERT, FRAG } from './shader.js';
+import { SHAPE_KEYS, toParams, layout } from './note-geometry.js';
 
 export const MATERIALS = [
   { id: 'clear', label: 'Clear glass' },
@@ -15,11 +16,7 @@ export const SCENES = [
   { id: 'studio', label: 'Studio' },
   { id: 'dusk', label: 'Dusk' },
   { id: 'void', label: 'Void' },
-];
-
-const SHAPE_KEYS = [
-  'headSize', 'headTilt', 'stemWidth', 'stemHeight', 'beamSlant', 'beamThickness', 'liquidity', 'rippleFreq',
-  'rippleAmp', 'detail', 'twist', 'lean', 'iridescence', 'dispersion', 'envelopeDepth', 'pulse', 'saturation',
+  { id: 'club', label: 'Neon club' },
 ];
 
 const UNIFORMS = [
@@ -59,42 +56,8 @@ function lerpHue(a, b, t) {
   return (a + d * t + 1) % 1;
 }
 
-function toParams(dna) {
-  const p = { hue: dna.hue, hue2: dna.hue2, beams: dna.beams, envelope: Float32Array.from(dna.envelope) };
-  for (const key of SHAPE_KEYS) p[key] = dna[key];
-  return p;
-}
-
 function cloneParams(p) {
   return { ...p, envelope: Float32Array.from(p.envelope) };
-}
-
-// Places heads, stems and beam(s) from the DNA, centred on the origin.
-function layout(p) {
-  const r = p.headSize;
-  const spacing = 1.22;
-  const h1 = [-spacing / 2, -0.62];
-  const h2 = [spacing / 2, -0.62 + p.beamSlant];
-  const attachX = r * 1.3 * Math.cos(p.headTilt) * 0.9;
-  const attachY = r * 1.3 * Math.sin(p.headTilt) * 0.5;
-  const s1x = h1[0] + attachX;
-  const s2x = h2[0] + attachX;
-  const top1 = h1[1] + p.stemHeight;
-  const top2 = h2[1] + p.stemHeight;
-  const minX = h1[0] - r * 1.3;
-  const maxX = s2x + p.stemWidth * 2;
-  const minY = Math.min(h1[1], h2[1]) - r;
-  const maxY = Math.max(top1, top2);
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-  return {
-    H1: [h1[0] - cx, h1[1] - cy, 0, r],
-    H2: [h2[0] - cx, h2[1] - cy, 0, r],
-    S1: [s1x - cx, h1[1] + attachY - cy, top1 - cy, p.stemWidth],
-    S2: [s2x - cx, h2[1] + attachY - cy, top2 - cy, p.stemWidth],
-    beam: [s1x - cx, top1 - cy, s2x - cx, top2 - cy],
-    beam2: [p.beamThickness, p.stemWidth * 2.6, p.beams, p.beamThickness * 1.75],
-  };
 }
 
 export class NoteRenderer {
@@ -118,6 +81,8 @@ export class NoteRenderer {
     this.look = { material: 0, scene: 0, influence: 0.7, ripples: true };
     this.camera = { yaw: 0, pitch: 0.12, zoom: 1 };
     this.shift = [0, 0];
+    this.molten = 0;
+    this.moltenTarget = 0;
     this.ripples = new Float32Array(MAX_RIPPLES * 4);
     this.rippleStrength = new Float32Array(MAX_RIPPLES);
     this.scale = 1;
@@ -136,8 +101,11 @@ export class NoteRenderer {
     this.vao = gl.createVertexArray();
   }
 
-  setDNA(dna, { instant = false } = {}) {
+  // A quiet change (only the colour moved) blends quickly without the glass going molten.
+  setDNA(dna, { instant = false, quiet = false } = {}) {
     const target = toParams(dna);
+    this.quietMorph = quiet;
+    this.morphDuration = quiet ? 0.6 : 1.6;
     if (!this.current || instant) {
       this.current = cloneParams(target);
       this.target = target;
@@ -150,7 +118,9 @@ export class NoteRenderer {
   }
 
   stepMorph() {
-    if (!this.from) return 0;
+    this.molten += (this.moltenTarget - this.molten) * 0.06;
+    const melt = this.molten * 0.38;
+    if (!this.from) return melt;
     const k = Math.min(1, (performance.now() / 1000 - this.morphStart) / this.morphDuration);
     const e = ease(k);
     const { from, target, current } = this;
@@ -161,7 +131,7 @@ export class NoteRenderer {
     for (let i = 0; i < current.envelope.length; i++) current.envelope[i] = lerp(from.envelope[i], target.envelope[i], e);
     if (k >= 1) this.from = null;
     // The glass goes molten mid-morph, then sets into the new form.
-    return Math.sin(Math.PI * k) * 0.32;
+    return Math.max(melt, this.quietMorph ? 0 : Math.sin(Math.PI * k) * 0.32);
   }
 
   setRipples(list, now) {
@@ -236,29 +206,36 @@ export class NoteRenderer {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  // Renders an off-screen square still at full quality and returns it as a 2D canvas.
-  snapshot(time, size) {
+  // Renders an off-screen still at full quality and returns it as a 2D canvas. Large stills are drawn
+  // in horizontal bands so no single draw call runs long enough to trip a GPU watchdog.
+  snapshot(time, width, height = width, shift = [0, 0]) {
     const gl = this.gl;
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     const fbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    this.draw(time, size, size, [0, 0]);
-    const pixels = new Uint8Array(size * size * 4);
-    gl.readPixels(0, 0, size, size, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    const band = Math.max(64, Math.floor(400000 / width));
+    gl.enable(gl.SCISSOR_TEST);
+    for (let y = 0; y < height; y += band) {
+      gl.scissor(0, y, width, Math.min(band, height - y));
+      this.draw(time, width, height, shift);
+    }
+    gl.disable(gl.SCISSOR_TEST);
+    const pixels = new Uint8Array(width * height * 4);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.deleteFramebuffer(fbo);
     gl.deleteTexture(tex);
 
     const out = document.createElement('canvas');
-    out.width = size;
-    out.height = size;
+    out.width = width;
+    out.height = height;
     const ctx = out.getContext('2d');
-    const image = ctx.createImageData(size, size);
-    const row = size * 4;
-    for (let y = 0; y < size; y++) image.data.set(pixels.subarray((size - 1 - y) * row, (size - y) * row), y * row);
+    const image = ctx.createImageData(width, height);
+    const row = width * 4;
+    for (let y = 0; y < height; y++) image.data.set(pixels.subarray((height - 1 - y) * row, (height - y) * row), y * row);
     ctx.putImageData(image, 0, 0);
     return out;
   }

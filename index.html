@@ -90,6 +90,12 @@
       <legend>Scene</legend>
       <div class="chips" id="scenes"></div>
     </fieldset>
+    <fieldset class="choice">
+      <legend>Glass color</legend>
+      <div class="chips" id="color-modes"></div>
+      <input type="range" id="custom-hue" class="hue-slider" min="0" max="359" step="1" value="200" aria-label="Custom glass hue" hidden>
+      <p class="hint" id="color-hint">From the key, the song's own color. Album art takes it from the cover.</p>
+    </fieldset>
     <div class="field">
       <div class="field-row"><label for="influence">Sound influence</label><output id="influence-out" for="influence">70%</output></div>
       <input type="range" id="influence" min="0" max="100" step="1" value="70">
@@ -97,7 +103,11 @@
     </div>
     <label class="switch"><input type="checkbox" id="ripples-toggle" checked><span>Ripples for every note</span></label>
     <label class="switch"><input type="checkbox" id="turn-toggle" checked><span>Slow turn</span></label>
-    <p class="hint">Drag the note to turn it. Scroll or pinch to zoom. Double-click to reset the view.</p>
+    <label class="switch" id="haptics-row" hidden><input type="checkbox" id="haptics-toggle"><span>Buzz on the beat</span></label>
+    <button class="source wide" id="ambient" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>Ambient mode
+    </button>
+    <p class="hint">Ambient mode hides everything but the note, full screen. Tap or press any key to come back. Drag the note to turn it, scroll or pinch to zoom, double-click to reset the view.</p>
   </div>
 </aside>
 
@@ -108,6 +118,18 @@
   </div>
   <div class="panel-body">
     <p class="lede" id="collection-empty">Notes you keep land here. Play a song, then press Keep.</p>
+    <div class="collection-tools" id="collection-tools" hidden>
+      <div class="chips small" id="collection-filters" role="group" aria-label="Show"></div>
+      <label class="sort"><span>Sort</span>
+        <select id="collection-sort">
+          <option value="newest">Newest</option>
+          <option value="energy">Energy</option>
+          <option value="tempo">Tempo</option>
+          <option value="color">Color</option>
+        </select>
+      </label>
+    </div>
+    <p class="hint" id="collection-none" hidden>No kept notes match this filter.</p>
     <ul class="grid" id="collection-grid"></ul>
     <p class="hint">Kept in this browser only. Saved notes show their glass; open the song again to hear it.</p>
   </div>
@@ -121,21 +143,32 @@
         <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>
         <span class="spinner" aria-hidden="true"></span>
       </button>
-      <div class="titles">
-        <p class="note-id" id="note-id">&nbsp;</p>
-        <h1 class="song" id="song-title">&nbsp;</h1>
-        <p class="song-meta" id="song-meta">&nbsp;</p>
+      <div class="info">
+        <img class="art" id="art" alt="" hidden>
+        <div class="titles">
+          <p class="note-id" id="note-id">&nbsp;</p>
+          <h1 class="song" id="song-title">&nbsp;</h1>
+          <p class="song-meta" id="song-meta">&nbsp;</p>
+        </div>
       </div>
       <div class="actions">
         <button class="act" id="keep" type="button" aria-pressed="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16l-5-4-5 4z"/></svg><span>Keep</span>
         </button>
-        <button class="act" id="save-card" type="button">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 15h8M8 18h5"/><circle cx="12" cy="9" r="3"/></svg><span>Card</span>
-        </button>
-        <button class="act" id="record" type="button">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3" class="fill"/></svg><span id="record-label">Clip</span>
-        </button>
+        <div class="menu-wrap">
+          <button class="act" id="export" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m-4 4l4-4 4 4M6 12v6a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-6"/></svg><span id="export-label">Share</span>
+          </button>
+          <div class="menu" id="export-menu" role="menu" aria-label="Share and export" hidden>
+            <button type="button" role="menuitem" id="ar-view" hidden><b>View in AR</b><small>Stand the note on your desk</small></button>
+            <button type="button" role="menuitem" id="save-card"><b>Note card</b><small>PNG, 1080 × 1350</small></button>
+            <button type="button" role="menuitem" id="save-wallpaper"><b>Wallpaper</b><small id="wallpaper-size">PNG sized for this screen</small></button>
+            <button type="button" role="menuitem" id="record"><b id="record-label">Video clip</b><small>8 seconds, with sound</small></button>
+            <button type="button" role="menuitem" id="save-glb"><b>3D model</b><small id="glb-hint">.glb for Blender and 3D viewers</small></button>
+            <button type="button" role="menuitem" id="save-usdz"><b>AR model</b><small>.usdz for iPhone, iPad and Vision Pro</small></button>
+            <button type="button" role="menuitem" id="copy-link"><b>Copy share link</b><small>Opens this note, without the audio</small></button>
+          </div>
+        </div>
         <button class="act" id="capture" type="button" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10m-4-4l4 4 4-4M5 19h14"/></svg><span id="capture-label">Make a note</span>
         </button>
@@ -155,6 +188,9 @@
       </button>
       <input type="file" id="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus,.aif,.aiff" hidden>
       <div class="demos" id="demos" role="group" aria-label="Demo songs"></div>
+      <button class="source" id="spotify" type="button" aria-pressed="false" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M7.5 9.5c3-1 6.5-.7 9 .8M8 12.6c2.5-.7 5.3-.4 7.4.8M8.6 15.4c2-.5 4.1-.3 5.7.6"/></svg><span id="spotify-label">Spotify</span>
+      </button>
       <button class="source" id="listen" type="button" aria-pressed="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4"/></svg><span id="listen-label">Listen</span>
       </button>
@@ -168,6 +204,12 @@
   <p class="busy-step" id="busy-step">Reading the file</p>
 </div>
 <div class="drop" id="drop" hidden><p>Drop a song to make its note</p></div>
+<div class="linkbox" id="linkbox" role="dialog" aria-labelledby="linkbox-title" hidden>
+  <p class="linkbox-title" id="linkbox-title">Copy this link</p>
+  <input type="text" id="link-input" readonly aria-label="Share link">
+  <button class="source primary" type="button" id="link-close">Done</button>
+</div>
+<p class="ambient-hint" id="ambient-hint" hidden>Tap anywhere or press any key to come back</p>
 <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
 <!-- APP:END-BODY -->
 <script type="module" src="js/main.js"></script>

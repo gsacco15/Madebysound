@@ -19,6 +19,14 @@ No build step and no dependencies: plain ES modules, WebGL 2 and Web Audio. Open
 WAV, FLAC, OGG), drop one on the page, play one of the three demos, or press Listen to use the
 microphone. On iPhone, open it in Safari and use Share → Add to Home Screen for a full-screen app.
 
+### Hosting on Vercel
+
+The app is static files with no build step, so Vercel serves it as is. In Vercel, **Add New → Project**,
+import `gsacco15/Madebysound`, leave the framework preset on **Other** with no build command, and deploy.
+Every push to `main` redeploys. `vercel.json` allows the microphone, wake lock and full screen;
+`.vercelignore` leaves tests and scripts out of the deployment. A real HTTPS address is what AR Quick Look,
+the microphone and Spotify sign-in need. GitHub Actions runs the tests on every push (`.github/workflows/ci.yml`).
+
 ## How a song becomes a note
 
 `js/analysis.js` reads the whole track (up to 8 minutes) at 22 kHz with a 2048-point FFT and a 512-sample
@@ -48,14 +56,53 @@ the bath.
 - **Stage**: a raymarched glass note (`js/shader.js`) with refraction, chromatic dispersion, thin-film
   iridescence and a rippling oil bath. Drag to turn, scroll or pinch to zoom, double-click to reset.
 - **How it was made**: the readout above, the loudness curve, band energy and the pitch-color wheel.
-- **Studio**: five materials (clear, frosted, song tint, liquid metal, neon edge), four scenes (oil bath,
-  studio, dusk, void), sound influence, ripples and slow-turn toggles.
+- **Generate**: while a song is analysed the glass goes molten and ripples form; it then sets into the
+  new note with a soft chime on the song's own tonic chord.
+- **Song tags**: title, artist, genre and cover art are read from MP3 (ID3v2), M4A, FLAC and WAV files.
+- **Studio**: five materials (clear, frosted, song tint, liquid metal, neon edge), five scenes (oil bath,
+  studio, dusk, void, neon club), glass color from the key, the album art or your own hue, sound
+  influence, ripples, slow turn, beat haptics (where the browser supports vibration) and ambient mode
+  (full screen, nothing but the note, screen kept awake).
 - **Collection**: keep notes in this browser (features plus a thumbnail; the DNA is rebuilt on load).
-- **Card**: a 1080×1350 PNG of the note with title, key, tempo, ID and loudness signature.
-- **Clip**: an 8-second video of the note playing, with sound.
+  Favorite them and filter by favorites, energy or genre; sort by newest, energy, tempo or color.
+- **Share menu**:
+  - *View in AR* on iPhone and iPad: AR Quick Look stands the note on your desk, about 20 cm tall.
+  - *Note card*: a 1080×1350 PNG with title, key, tempo, ID and loudness signature.
+  - *Wallpaper*: a PNG at your screen's native resolution, with the note clear of the lock-screen clock.
+  - *Video clip*: 8 seconds of the note playing, with sound.
+  - *3D model* (.glb with glass material extensions) and *AR model* (.usdz).
+  - *Copy share link*: the note's features in the URL, so anyone can open the same glass without the audio.
 - **Listen**: drive the glass from the microphone, then capture 12 seconds to make a note from it.
+- **Spotify** (optional, see below): shows what you're playing and colors the glass from its cover.
 
-Rendering resolution adapts to keep the frame rate up on phones.
+Live levels run through critically damped springs, so the glass has weight and never jitters. Rendering
+resolution adapts to keep the frame rate up on phones.
+
+### 3D export
+
+`js/note-geometry.js` holds the note's distance field in JavaScript, mirroring the shader with the music at
+rest. `js/mesh.js` meshes it with surface nets (one vertex per surface cell, snapped onto the surface;
+normals from the field's gradient), and `js/export3d.js` writes binary glTF and USDZ (a USDA layer in a
+stored, 64-byte-aligned zip). Meshing runs in a Web Worker. The output passes the Khronos glTF validator and
+OpenUSD's validators, including the USDZ package checks; the tests check that meshes are closed and
+outward-facing.
+
+## Spotify
+
+Spotify streams are copy-protected, and since late 2024 new Spotify apps can't use audio analysis, audio
+features or 30-second previews. So Spotify can't shape a note. What it can do is say what you're playing:
+madebysound shows the title, artist and cover, colors the glass from the cover, and listens through the
+microphone so the glass moves with the song. *Make a note* then captures 12 seconds and keeps it under
+the Spotify track's name.
+
+1. Create an app at <https://developer.spotify.com/dashboard> with the **Web API**.
+2. Add redirect URIs that match where you run the app exactly, for example `http://127.0.0.1:5173/`
+   (Spotify accepts plain `http` only for `127.0.0.1`, not `localhost`) and
+   your Vercel address, such as `https://madebysound.vercel.app/`.
+3. Put the app's **Client ID** in `SPOTIFY_CLIENT_ID` in `js/spotify.js`. Sign-in uses PKCE, so the Client
+   Secret is never needed and must not go in the code.
+
+The Spotify button stays hidden until a Client ID is set.
 
 ## Project layout
 
@@ -72,6 +119,14 @@ js/demos.js           three demo songs composed in code
 js/demo-features.js   their measured features (generated)
 js/collection.js      kept notes in localStorage
 js/exporter.js        cards, clips, saving files
+js/note-geometry.js   note layout and its distance field, shared by shader host and exporter
+js/mesh.js            surface-nets mesher
+js/export3d.js        GLB, USDZ and zip writers
+js/model-worker.js    meshing off the main thread
+js/tags.js            ID3v2, MP4, FLAC and WAV tag reader
+js/palette.js         glass colors from album art
+js/share.js           share-link encoding
+js/spotify.js         Spotify now playing (PKCE)
 scripts/              icon and demo-feature generators, artifact build
 tests/                node:test suites with synthetic signals
 ```
@@ -83,9 +138,8 @@ app running on port 5173.
 
 - **Native iOS.** SwiftUI shell, the same SDF in a Metal fragment shader, AVAudioEngine taps plus
   Accelerate (vDSP) for the FFT. The DNA mapping ports over as is, and the existing tests pin its behavior.
-- **Apple Music and Spotify.** Streaming tracks are DRM-protected, so their audio can't be read directly.
-  Two workable routes are the 30-second preview clips that the Apple Music API exposes for each song, and
-  the microphone (Listen) while the song plays from another app.
-- **Exports.** USDZ/glTF meshes by marching-cubing the same distance field, for AR Quick Look.
-- **Shared notes.** A link that carries the DNA (it's under 1 KB of features) so anyone can see your note
-  without the audio.
+- **Apple Music previews.** The Apple Music API exposes a 30-second preview clip for each song, which could
+  be analysed into a real note. It needs an Apple Developer token, signed on a small server.
+- **A public feed.** Notes are small (a share link is about 200 characters), so a feed, "same song,
+  different listeners" comparisons and artist pages need only a small backend.
+- **Multi-note scenes.** Several kept notes in one bath, bumping into each other.
