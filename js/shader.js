@@ -393,8 +393,10 @@ uniform vec4 uTile;     // rim angles of the song's strongest pitch and its seco
 #define PI 3.14159265
 const vec2 TILE = vec2(0.34);
 const float CORNER = 0.15;
-const float BEVEL = 0.075;
-const float NOTE_SCALE = 0.235;
+const float BEVEL = 0.085;
+const float NOTE_SCALE = 0.242;
+const float NOTE_NARROW = 0.86;
+const float LENS_REACH = 0.15;
 
 vec3 hsv(float h, float s, float v) {
   vec3 k = clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
@@ -458,7 +460,7 @@ float beam2(vec2 p, float offset, float th) {
   vec2 nrm = vec2(-dir.y, dir.x);
   vec2 c = 0.5 * (a + b) - nrm * (th * 0.5 + offset);
   vec2 q = p - c;
-  return sdRoundBox(vec2(dot(q, dir), dot(q, nrm)), vec2(0.5 * length(b - a) + uS1.w * 2.4, th * 0.5), th * 0.3);
+  return sdRoundBox(vec2(dot(q, dir), dot(q, nrm)), vec2(0.5 * length(b - a) + uS1.w * 1.9, th * 0.5), th * 0.15);
 }
 
 // The song's note, flat and bold, in layout units (the same layout as the sculpture).
@@ -467,15 +469,16 @@ float noteShape(vec2 p) {
   float r = uH1.w;
   float d = ellipse(rot(uShape.x) * (p - uH1.xy), vec2(1.3, 0.92) * r);
   d = smin(d, ellipse(rot(uShape.x) * (p - uH2.xy), vec2(1.3, 0.92) * r), join);
+  float th = uBeam2.x * 2.2;
   for (int i = 0; i < 2; i++) {
     vec4 s = i == 0 ? uS1 : uS2;
-    float ty = clamp((p.y - s.y) / (s.z - s.y), 0.0, 1.0);
-    float w = s.w * 2.3 * (0.94 + 0.12 * envAt(float(i) * 0.5 + ty * 0.5));
-    d = smin(d, length(p - vec2(s.x, mix(s.y, s.z, ty))) - w, join);
+    // Stems stop inside the beam so their rounded ends don't bump out above it.
+    float top = s.z - th * 0.5;
+    float ty = clamp((p.y - s.y) / (top - s.y), 0.0, 1.0);
+    d = smin(d, length(p - vec2(s.x, mix(s.y, top, ty))) - s.w * 1.9, join);
   }
-  float th = uBeam2.x * 1.8;
   float bm = beam2(p, 0.0, th);
-  if (uBeam2.z > 1.5) bm = min(bm, beam2(p, th * 1.45, th * 0.8));
+  if (uBeam2.z > 1.5) bm = min(bm, beam2(p, th * 1.35, th * 0.75));
   return smin(d, bm, join * 0.7);
 }
 
@@ -494,13 +497,13 @@ float bath(vec2 p) {
   float t = uTime;
   float r = length(p);
   // The transducer under the middle pumps rings outward with the bass and kicks on each beat.
-  float h = (0.0006 + 0.0075 * uLive.x * k + 0.004 * uLive.w * k) * sin(r * 46.0 - t * 6.0) / sqrt(1.0 + r * 8.0);
+  float h = (0.0003 + 0.0075 * uLive.x * uLive.x * k + 0.004 * uLive.w * k) * sin(r * 46.0 - t * 6.0) / sqrt(1.0 + r * 8.0);
   // The song's two strongest pitches sound from their places on the rim; their waves cross and interfere.
-  float level = 0.0003 + 0.006 * pow(uLive2.x * k, 1.5);
+  float level = 0.00015 + 0.006 * pow(uLive2.x * k, 1.5);
   h += wave(p, rimPoint(uTile.x), 36.0 + 36.0 * fract(uTile.x / (2.0 * PI)), 3.0, level * uTile.z * 12.0);
   h += wave(p, rimPoint(uTile.y), 36.0 + 36.0 * fract(uTile.y / (2.0 * PI)), 3.4, level * uTile.w * 12.0);
   // The song's frozen ripples, a slow standing pattern.
-  h += uSurf.y * 0.12 * sin(r * uSurf.x * 3.0) * cos(t * 0.6);
+  h += uSurf.y * 0.06 * sin(r * uSurf.x * 3.0) * cos(t * 0.6);
   // Each note you hear sends a ring across the bath from its pitch's place on the rim.
   for (int i = 0; i < 12; i++) {
     float s = uRipStr[i];
@@ -511,7 +514,7 @@ float bath(vec2 p) {
     h += s * 0.006 * exp(-q.z * 1.6) * sin(x * 70.0) * exp(-x * x * 300.0);
   }
   // Highs shimmer across the surface.
-  h += (0.0003 + 0.0015 * uLive.z * k) * sin(p.x * 95.0 + t * 4.0) * sin(p.y * 88.0 - t * 3.3);
+  h += (0.00015 + 0.0015 * uLive.z * k) * sin(p.x * 95.0 + t * 4.0) * sin(p.y * 88.0 - t * 3.3);
   // While a new song is being listened to, the bath churns.
   h += uLive2.z * 0.02 * sin(r * 30.0 - t * 4.0) * sin(atan(p.y, p.x) * 5.0 + t);
   return h;
@@ -531,12 +534,14 @@ float glassSlope(float inner) {
 // The bath's floor: dark, with the note lying on it and the transducer under the middle.
 vec3 floorColor(vec2 p, float blur) {
   int mat = int(uLook2.y + 0.5);
-  float d = noteShape(p / NOTE_SCALE) * NOTE_SCALE;
+  // Drawn a little narrower than the sculpture's layout, so the glyph stands upright in the tile.
+  float d = noteShape(p / NOTE_SCALE / vec2(NOTE_NARROW, 1.0)) * NOTE_SCALE * NOTE_NARROW;
   float m = smoothstep(blur, -blur, d);
   float r = length(p);
   vec3 base = vec3(0.01, 0.011, 0.014) + vec3(0.025) * smoothstep(0.05, 0.045, r) * smoothstep(0.018, 0.024, r);
   vec3 tint = hsv(uLook.x, uLook.z, 1.0);
-  vec3 ink = vec3(0.95, 0.955, 0.965) * (0.9 + 0.1 * smoothstep(0.0, 0.02, -d));
+  // A slightly domed white: soft grey just inside its edge, full white across the middle.
+  vec3 ink = vec3(0.96, 0.965, 0.975) * (0.86 + 0.14 * smoothstep(0.0, 0.012, -d));
   if (mat == 2) ink = mix(vec3(1.0), tint, 0.8);
   if (mat == 3) ink = mix(vec3(0.45), vec3(1.0), 0.5 + 0.5 * sin(d * 160.0 + p.x * 12.0 - p.y * 9.0)) * mix(vec3(1.0), tint, 0.3);
   if (mat == 4) {
@@ -596,24 +601,35 @@ void main() {
   // Inside: down through the glass and the moving oil to the note on the floor.
   if (dT < aa * 2.0) {
     vec2 n = tileNormal(pg);
-    float gs = glassSlope(max(-dT, 0.0));
-    // The rounded rim bends rays inward, so the middle of the floor is drawn out to the edge.
-    vec2 glassBend = -n * gs * 0.06;
+    float inner = max(-dT, 0.0);
+    float gs = glassSlope(inner);
+    // The rounded rim bends rays inward: at the very edge it shows the floor a short way in, so whatever
+    // part of the note lies near the rim is drawn out along it.
+    float lens = 1.0 - clamp(inner / BEVEL, 0.0, 1.0);
+    vec2 glassBend = -n * LENS_REACH * pow(lens, 1.3);
     float depth = 0.1 + 0.12 * uSurf.w;
-    vec2 bathBend = -slope * depth * 0.32;
+    vec2 bathBend = -slope * depth * 0.22;
     vec2 base = uv + tilt * 0.6;
     // The glass splits colour far more than the thin oil does.
-    float glassSpread = 0.1 + uLook2.x * 2.0 + 0.05 * uLive.z * k;
-    float bathSpread = 0.04 + 0.04 * uLive.z * k;
+    float glassSpread = 0.15 + uLook2.x * 1.5 + 0.06 * uLive.z * k;
+    float bathSpread = 0.05 + 0.05 * uLive.z * k;
     float blur = mat == 1 ? aa * 6.0 + 0.004 : aa * 1.2;
-    const vec3 C0 = vec3(0.12, 0.3, 1.0);
-    const vec3 C1 = vec3(0.25, 0.95, 1.0);
-    const vec3 C2 = vec3(1.0, 0.82, 0.5);
-    const vec3 C3 = vec3(1.0, 0.3, 0.2);
+    // Six wavelengths from deep blue to red, each bent by its own amount.
+    const vec3 C0 = vec3(0.1, 0.12, 1.0);
+    const vec3 C1 = vec3(0.05, 0.55, 1.0);
+    const vec3 C2 = vec3(0.2, 1.0, 0.95);
+    const vec3 C3 = vec3(1.0, 0.95, 0.3);
+    const vec3 C4 = vec3(1.0, 0.45, 0.1);
+    const vec3 C5 = vec3(1.0, 0.1, 0.3);
     vec2 base0 = base + glassBend + bathBend;
     vec2 split = glassBend * glassSpread + bathBend * bathSpread;
-    vec3 seen = (C0 * floorColor(base0 + split * 1.5, blur) + C1 * floorColor(base0 + split * 0.5, blur)
-      + C2 * floorColor(base0 - split * 0.5, blur) + C3 * floorColor(base0 - split * 1.5, blur)) / (C0 + C1 + C2 + C3);
+    vec3 seen = (C0 * floorColor(base0 + split * 1.0, blur) + C1 * floorColor(base0 + split * 0.6, blur)
+      + C2 * floorColor(base0 + split * 0.2, blur) + C3 * floorColor(base0 - split * 0.2, blur)
+      + C4 * floorColor(base0 - split * 0.6, blur) + C5 * floorColor(base0 - split * 1.0, blur))
+      / (C0 + C1 + C2 + C3 + C4 + C5);
+    // Where the white reaches the very edge, the glass bends its last light warm: amber into red.
+    float outer = smoothstep(0.028, 0.0, inner);
+    seen += dot(seen, vec3(0.333)) * outer * vec3(0.45, -0.25, -0.6);
     if (mat == 1) seen = mix(seen, vec3(dot(seen, vec3(0.333))) + 0.06, 0.35);
     if (mat == 2) seen = mix(seen, seen * tint, 0.35);
 
@@ -622,8 +638,8 @@ void main() {
     float fres = pow(1.0 - gn.z, 1.5);
     vec3 film = 0.5 + 0.5 * cos(2.0 * PI * (vec3(0.0, 0.33, 0.67) + rimAngle(pg) / (2.0 * PI) + uLook.x + gs * 0.3));
     seen += (film * 0.6 + 0.4) * fres * 0.45;
-    seen += vec3(0.9) * pow(max(dot(gn, normalize(L)), 0.0), 40.0) * smoothstep(0.0, 0.3, gs);
-    seen += vec3(0.035) * smoothstep(0.25, -0.35, dot(pg, normalize(vec2(1.0, -1.0))));
+    seen += vec3(0.3) * pow(max(dot(gn, normalize(L)), 0.0), 140.0) * smoothstep(0.0, 0.3, gs);
+    seen += vec3(0.02) * smoothstep(0.25, -0.35, dot(pg, normalize(vec2(1.0, -1.0))));
     seen += tint * uLive.w * k * 0.04;
     col = mix(col, seen, inside);
   }
