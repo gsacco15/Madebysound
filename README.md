@@ -53,8 +53,15 @@ the bath.
 
 ## What's in the app
 
-- **Stage**: a raymarched glass note (`js/shader.js`) with refraction, chromatic dispersion, thin-film
-  iridescence and a rippling oil bath. Drag to turn, scroll or pinch to zoom, double-click to reset.
+- **Two views** (`js/shader.js`), both shaped by the same DNA. Drag to turn or tilt, scroll or pinch to
+  zoom, double-click to reset.
+  - *Tile* (default): looking straight down into a glass tile on a dark bath, the way the physical piece was
+    filmed. The note is a white liquid. The song's two strongest pitches pull liquid up the glass at their
+    places on the pitch wheel, louder stretches swell it, bass sloshes it around, every note you hear
+    pushes liquid toward its own pitch's place and sends a rounded ripple out through the bath, and the
+    glass splits light into spectral fringes where liquid meets the rim.
+  - *Sculpture*: the note as free-standing raymarched glass with refraction, dispersion, thin-film
+    iridescence and a rippling oil bath.
 - **How it was made**: the readout above, the loudness curve, band energy and the pitch-color wheel.
 - **Generate**: while a song is analysed the glass goes molten and ripples form; it then sets into the
   new note with a soft chime on the song's own tonic chord.

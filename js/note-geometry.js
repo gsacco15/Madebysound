@@ -6,8 +6,21 @@ export const SHAPE_KEYS = [
   'rippleAmp', 'detail', 'twist', 'lean', 'iridescence', 'dispersion', 'envelopeDepth', 'pulse', 'saturation',
 ];
 
+// In the tile view the liquid creeps up the wall at the song's two strongest pitches, placed on the
+// circle of fifths as in the pitch wheel. Positions are fractions of a turn, 0 at the bottom.
+function rimPulls(dna) {
+  const order = dna.chroma.map((v, pc) => [v, pc]).filter(([, pc]) => pc !== dna.tonic).sort((a, b) => b[0] - a[0]);
+  const second = order.length ? order[0][1] : (dna.tonic + 7) % 12;
+  return {
+    rimA: ((dna.tonic * 7) % 12) / 12,
+    rimB: ((second * 7) % 12) / 12,
+    pullA: 0.05 + 0.055 * Math.min(1, Math.max(0, (dna.headSize - 0.29) / 0.11)),
+    pullB: 0.03 + 0.04 * Math.min(1, Math.max(0, (dna.stemHeight - 1.3) / 0.4)),
+  };
+}
+
 export function toParams(dna) {
-  const p = { hue: dna.hue, hue2: dna.hue2, beams: dna.beams, envelope: Float32Array.from(dna.envelope) };
+  const p = { hue: dna.hue, hue2: dna.hue2, beams: dna.beams, envelope: Float32Array.from(dna.envelope), ...rimPulls(dna) };
   for (const key of SHAPE_KEYS) p[key] = dna[key];
   return p;
 }

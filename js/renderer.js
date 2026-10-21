@@ -1,7 +1,12 @@
 // WebGL2 host for the glass-note shader: DNA → uniforms, morphing between notes, snapshots.
 
-import { VERT, FRAG } from './shader.js';
+import { VERT, FRAG, FRAG_TILE } from './shader.js';
 import { SHAPE_KEYS, toParams, layout } from './note-geometry.js';
+
+export const VIEWS = [
+  { id: 'tile', label: 'Tile' },
+  { id: 'sculpture', label: 'Sculpture' },
+];
 
 export const MATERIALS = [
   { id: 'clear', label: 'Clear glass' },
@@ -20,8 +25,8 @@ export const SCENES = [
 ];
 
 const UNIFORMS = [
-  'uRes', 'uTime', 'uCam', 'uShift', 'uH1', 'uH2', 'uS1', 'uS2', 'uBeam', 'uBeam2', 'uShape', 'uSurf', 'uLook',
-  'uLook2', 'uLive', 'uLive2', 'uEnv', 'uRip', 'uRipStr',
+  'uRes', 'uTime', 'uCam', 'uShift', 'uZoom', 'uH1', 'uH2', 'uS1', 'uS2', 'uBeam', 'uBeam2', 'uShape', 'uSurf', 'uLook',
+  'uLook2', 'uLive', 'uLive2', 'uEnv', 'uRip', 'uRipStr', 'uTile',
 ];
 
 const MAX_RIPPLES = 12;
@@ -36,10 +41,10 @@ function compile(gl, type, source) {
   return shader;
 }
 
-function link(gl) {
+function link(gl, fragment) {
   const program = gl.createProgram();
   gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, VERT));
-  gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, FRAG));
+  gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, fragment));
   gl.linkProgram(program);
   if (!gl.getProgramParameter(program, gl.LINK_STATUS) && !gl.isContextLost()) {
     throw new Error(`Shader failed to link: ${gl.getProgramInfoLog(program)}`);
@@ -78,7 +83,7 @@ export class NoteRenderer {
     this.morphStart = 0;
     this.morphDuration = 1.6;
     this.live = { bass: 0, mid: 0, high: 0, beat: 0, level: 0 };
-    this.look = { material: 0, scene: 0, influence: 0.7, ripples: true };
+    this.look = { view: 0, material: 0, scene: 0, influence: 0.7, ripples: true };
     this.camera = { yaw: 0, pitch: 0.12, zoom: 1 };
     this.shift = [0, 0];
     this.molten = 0;
@@ -96,8 +101,11 @@ export class NoteRenderer {
 
   init() {
     const gl = this.gl;
-    this.program = link(gl);
-    this.loc = Object.fromEntries(UNIFORMS.map((name) => [name, gl.getUniformLocation(this.program, name)]));
+    // One program per view: the tile (top-down liquid) and the sculpture (raymarched glass).
+    this.programs = [FRAG_TILE, FRAG].map((source) => {
+      const program = link(gl, source);
+      return { program, loc: Object.fromEntries(UNIFORMS.map((name) => [name, gl.getUniformLocation(program, name)])) };
+    });
     this.vao = gl.createVertexArray();
   }
 
@@ -127,6 +135,10 @@ export class NoteRenderer {
     for (const key of SHAPE_KEYS) current[key] = lerp(from[key], target[key], e);
     current.hue = lerpHue(from.hue, target.hue, e);
     current.hue2 = lerpHue(from.hue2, target.hue2, e);
+    current.rimA = lerpHue(from.rimA, target.rimA, e);
+    current.rimB = lerpHue(from.rimB, target.rimB, e);
+    current.pullA = lerp(from.pullA, target.pullA, e);
+    current.pullB = lerp(from.pullB, target.pullB, e);
     current.beams = e < 0.5 ? from.beams : target.beams;
     for (let i = 0; i < current.envelope.length; i++) current.envelope[i] = lerp(from.envelope[i], target.envelope[i], e);
     if (k >= 1) this.from = null;
@@ -173,7 +185,7 @@ export class NoteRenderer {
 
   draw(time, w, h, shift) {
     const gl = this.gl;
-    const u = this.loc;
+    const { program, loc: u } = this.programs[this.look.view === 1 ? 1 : 0];
     const surge = this.stepMorph();
     const p = this.current;
     const geo = layout(p);
@@ -182,11 +194,12 @@ export class NoteRenderer {
     const distance = 1.12 / fit / 0.62 / this.camera.zoom;
 
     gl.viewport(0, 0, w, h);
-    gl.useProgram(this.program);
+    gl.useProgram(program);
     gl.uniform2f(u.uRes, w, h);
     gl.uniform1f(u.uTime, time);
     gl.uniform3f(u.uCam, this.camera.yaw, this.camera.pitch, distance);
     gl.uniform2f(u.uShift, shift[0], shift[1]);
+    gl.uniform1f(u.uZoom, this.camera.zoom * Math.min(1, aspect / 0.95));
     gl.uniform4fv(u.uH1, geo.H1);
     gl.uniform4fv(u.uH2, geo.H2);
     gl.uniform4fv(u.uS1, geo.S1);
@@ -200,6 +213,7 @@ export class NoteRenderer {
     gl.uniform4f(u.uLive, this.live.bass, this.live.mid, this.live.high, this.live.beat);
     gl.uniform4f(u.uLive2, this.live.level, p.pulse, surge, this.look.ripples ? 1 : 0);
     gl.uniform1fv(u.uEnv, p.envelope);
+    gl.uniform4f(u.uTile, p.rimA * Math.PI * 2, p.rimB * Math.PI * 2, p.pullA, p.pullB);
     gl.uniform4fv(u.uRip, this.ripples);
     gl.uniform1fv(u.uRipStr, this.rippleStrength);
     gl.bindVertexArray(this.vao);

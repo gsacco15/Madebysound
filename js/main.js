@@ -1,4 +1,4 @@
-import { NoteRenderer, MATERIALS, SCENES } from './renderer.js';
+import { NoteRenderer, VIEWS, MATERIALS, SCENES } from './renderer.js';
 import { AudioEngine } from './audio-engine.js';
 import { analyzeAudioBuffer } from './analysis.js';
 import { makeDNA, describe, pitchHue, fifthsPosition, PITCH_NAMES } from './dna.js';
@@ -19,7 +19,7 @@ const els = Object.fromEntries(
     'ar-view', 'save-card', 'save-wallpaper', 'wallpaper-size', 'record', 'record-label', 'save-glb', 'glb-hint', 'save-usdz',
     'copy-link', 'capture', 'capture-label', 'seek', 'track-wave', 'time-now', 'time-total', 'open', 'file', 'demos',
     'spotify', 'spotify-label', 'listen', 'listen-label', 'busy', 'busy-title', 'busy-step', 'busy-fill', 'drop', 'toast',
-    'readout', 'env-chart', 'bands', 'wheel', 'materials', 'scenes', 'color-modes', 'custom-hue', 'color-hint', 'influence',
+    'readout', 'env-chart', 'env-hint', 'wheel-hint', 'bands', 'wheel', 'views', 'view-hint', 'materials', 'scenes', 'color-modes', 'custom-hue', 'color-hint', 'influence',
     'influence-out', 'ripples-toggle', 'turn-toggle', 'haptics-row', 'haptics-toggle', 'ambient', 'ambient-hint',
     'collection-grid', 'collection-empty', 'collection-count', 'collection-tools', 'collection-filters', 'collection-sort',
     'collection-none', 'dock', 'linkbox', 'link-input', 'link-close',
@@ -30,6 +30,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const arSupported = !inArtifactViewer && !!document.createElement('a').relList?.supports?.('ar');
 const SETTINGS_KEY = 'madebysound.settings.v1';
 const settings = {
+  view: 'tile',
   material: 0,
   scene: 0,
   influence: 0.7,
@@ -700,6 +701,13 @@ function renderReadout() {
   );
   drawEnvelopeChart();
   drawWheel();
+  const tile = settings.view === 'tile';
+  els.envHint.textContent = tile
+    ? 'The louder stretches make the liquid at the rim swell. In the sculpture this curve is engraved along the stems.'
+    : 'Engraved along the stems: the first half of the song runs up the left stem, the second half up the right.';
+  els.wheelHint.textContent = tile
+    ? "The song's two strongest pitches pull liquid up the glass at their places on this wheel. While it plays, each note you hear pushes liquid toward its own place and sends a ripple out from the tile."
+    : "While a song plays, each note you hear drops a ripple in its pitch's color, from that pitch's place around the bath. Pitches a fifth apart sit side by side.";
 }
 
 function drawEnvelopeChart() {
@@ -1215,6 +1223,7 @@ function updateColorChips() {
 }
 
 function applyRenderSettings() {
+  renderer.look.view = settings.view === 'sculpture' ? 1 : 0;
   renderer.look.material = settings.material;
   renderer.look.scene = settings.scene;
   renderer.look.influence = settings.influence;
@@ -1227,6 +1236,11 @@ function bindStudio() {
     if (renderer) applyRenderSettings();
     writeSettings();
   };
+  buildChoices(els.views, 'view', VIEWS, Math.max(0, VIEWS.findIndex((v) => v.id === settings.view)), (i) => {
+    settings.view = VIEWS[i].id;
+    saveAndApply();
+    renderReadout();
+  });
   buildChoices(els.materials, 'material', MATERIALS, settings.material, (i) => {
     settings.material = i;
     saveAndApply();

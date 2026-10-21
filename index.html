@@ -62,7 +62,7 @@
     <section class="block">
       <h3>Loudness over the song</h3>
       <canvas class="env-chart" id="env-chart"></canvas>
-      <p class="hint">Engraved along the stems: the first half of the song runs up the left stem, the second half up the right.</p>
+      <p class="hint" id="env-hint">Engraved along the stems: the first half of the song runs up the left stem, the second half up the right.</p>
     </section>
     <section class="block">
       <h3>Where the energy sits</h3>
@@ -71,7 +71,7 @@
     <section class="block">
       <h3>A ripple for every note</h3>
       <canvas class="wheel" id="wheel" width="400" height="400"></canvas>
-      <p class="hint">While a song plays, each note you hear drops a ripple in its pitch's color, from that pitch's place around the bath. Pitches a fifth apart sit side by side.</p>
+      <p class="hint" id="wheel-hint">While a song plays, each note you hear drops a ripple in its pitch's color, from that pitch's place around the bath. Pitches a fifth apart sit side by side.</p>
     </section>
   </div>
 </aside>
@@ -82,6 +82,11 @@
     <button class="icon-btn" type="button" data-close aria-label="Close panel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </div>
   <div class="panel-body">
+    <fieldset class="choice">
+      <legend>View</legend>
+      <div class="chips" id="views"></div>
+      <p class="hint" id="view-hint">Looking down into a glass tile of liquid. The sculpture is the same note as free-standing glass.</p>
+    </fieldset>
     <fieldset class="choice">
       <legend>Material</legend>
       <div class="chips" id="materials"></div>

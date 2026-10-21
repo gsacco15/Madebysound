@@ -360,3 +360,269 @@ void main() {
   col += (hash(gl_FragCoord.xy + fract(uTime)) - 0.5) * (2.0 / 255.0);
   outColor = vec4(col, 1.0);
 }`;
+
+// The tile view: looking straight down into a glass tile on a dark bath. The song's note is a white
+// liquid inside it. The song's loudness wets the walls around the rim, each note you hear pushes
+// liquid toward its pitch's place on the rim, and the glass splits light where liquid meets the edge.
+export const FRAG_TILE = /* glsl */ `#version 300 es
+precision highp float;
+out vec4 outColor;
+
+uniform vec2 uRes;
+uniform float uTime;
+uniform vec3 uCam;
+uniform vec2 uShift;
+uniform float uZoom;
+uniform vec4 uH1;
+uniform vec4 uH2;
+uniform vec4 uS1;
+uniform vec4 uS2;
+uniform vec4 uBeam;
+uniform vec4 uBeam2;
+uniform vec4 uShape;
+uniform vec4 uSurf;
+uniform vec4 uLook;
+uniform vec4 uLook2;
+uniform vec4 uLive;
+uniform vec4 uLive2;
+uniform float uEnv[32];
+uniform vec4 uRip[12];
+uniform float uRipStr[12];
+uniform vec4 uTile;     // rim angle of the song's strongest pitch and its second, and how far each pulls
+
+#define PI 3.14159265
+const vec2 TILE = vec2(0.34);
+const float CORNER = 0.15;
+const float NOTE_SCALE = 0.215;
+
+vec3 hsv(float h, float s, float v) {
+  vec3 k = clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+  return v * mix(vec3(1.0), k, s);
+}
+
+mat2 rot(float a) {
+  float c = cos(a), s = sin(a);
+  return mat2(c, -s, s, c);
+}
+
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+float smin(float a, float b, float k) {
+  float h = max(k - abs(a - b), 0.0) / k;
+  return min(a, b) - h * h * k * 0.25;
+}
+
+float envAt(float t) {
+  float x = clamp(t, 0.0, 1.0) * 31.0;
+  int i = int(floor(x));
+  int j = min(i + 1, 31);
+  return mix(uEnv[i], uEnv[j], fract(x));
+}
+
+float sdRoundBox(vec2 p, vec2 b, float r) {
+  vec2 q = abs(p) - b + r;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+float tileDist(vec2 p) {
+  return sdRoundBox(p, TILE, CORNER);
+}
+
+vec2 tileNormal(vec2 p) {
+  vec2 e = vec2(0.001, 0.0);
+  return normalize(vec2(tileDist(p + e.xy) - tileDist(p - e.xy), tileDist(p + e.yx) - tileDist(p - e.yx)) + 1e-6);
+}
+
+// Angle around the tile, 0 at the bottom, matching the pitch wheel in the readout.
+float rimAngle(vec2 p) {
+  return atan(p.x, -p.y);
+}
+
+float ellipse(vec2 p, vec2 r) {
+  float k0 = length(p / r);
+  float k1 = length(p / (r * r));
+  return k0 * (k0 - 1.0) / k1;
+}
+
+float beam2(vec2 p, float offset, float th) {
+  vec2 a = uBeam.xy;
+  vec2 b = uBeam.zw;
+  vec2 dir = normalize(b - a);
+  vec2 nrm = vec2(-dir.y, dir.x);
+  vec2 c = 0.5 * (a + b) - nrm * (th * 0.5 + offset);
+  vec2 q = p - c;
+  float u = dot(q, dir);
+  float v = dot(q, nrm) + 0.03 * uLive.z * uLook2.w * sin(u * 9.0 - uTime * 7.0);
+  return sdRoundBox(vec2(u, v), vec2(0.5 * length(b - a) + uS1.w * 2.4, th * 0.5), th * 0.3);
+}
+
+// The same note layout as the sculpture, drawn bold and flat, in layout units.
+float noteShape(vec2 p) {
+  float k = uLook2.w;
+  float t = uTime;
+  float join = uShape.y * 0.8 + uLive2.z + 0.02;
+  float r = uH1.w * (1.0 + 0.12 * uLive.x * k);
+  float d = ellipse(rot(uShape.x) * (p - uH1.xy), vec2(1.3, 0.92) * r);
+  d = smin(d, ellipse(rot(uShape.x) * (p - uH2.xy), vec2(1.3, 0.92) * r), join);
+  for (int i = 0; i < 2; i++) {
+    vec4 s = i == 0 ? uS1 : uS2;
+    float ty = clamp((p.y - s.y) / (s.z - s.y), 0.0, 1.0);
+    float w = s.w * 2.3 * (0.94 + 0.12 * envAt(float(i) * 0.5 + ty * 0.5));
+    d = smin(d, length(p - vec2(s.x, mix(s.y, s.z, ty))) - w, join);
+  }
+  float th = uBeam2.x * 1.8;
+  float bm = beam2(p, 0.0, th);
+  if (uBeam2.z > 1.5) bm = min(bm, beam2(p, th * 1.45, th * 0.8));
+  d = smin(d, bm, join * 0.7);
+  float tremble = 0.004 + 0.03 * uLive.y * k + uLive2.z * 0.08;
+  return d + tremble * sin(p.x * 7.0 + t * 2.3) * sin(p.y * 6.0 - t * 1.9);
+}
+
+float wrapAngle(float a) {
+  return mod(a + PI, 2.0 * PI) - PI;
+}
+
+// The white liquid: the note, plus liquid pressed against the walls.
+float liquid(vec2 p) {
+  float k = uLook2.w;
+  float note = noteShape(p / NOTE_SCALE) * NOTE_SCALE;
+  float wall = -tileDist(p);
+  float ang = rimAngle(p);
+  float around = fract(ang / (2.0 * PI) + 1.0);
+  // The song's two strongest pitches pull liquid up the wall at their places on the rim;
+  // its loudness over time makes the edge of that liquid swell and thin.
+  float da = wrapAngle(ang - uTile.x);
+  float thick = uTile.z * exp(-da * da * 5.0);
+  da = wrapAngle(ang - uTile.y);
+  thick += uTile.w * exp(-da * da * 7.0);
+  thick *= (0.75 + 0.5 * envAt(around)) * (1.0 + 0.6 * uLive.w * k);
+  // Bass sloshes a wave of liquid around the dish.
+  float slosh = max(0.0, sin(ang * 2.0 - uTime * 0.8 + 1.3));
+  slosh *= slosh;
+  thick += 0.045 * uLive.x * k * slosh * slosh;
+  // Each note you hear pushes liquid toward its pitch's place on the rim.
+  for (int i = 0; i < 12; i++) {
+    float s = uRipStr[i];
+    if (s <= 0.0) continue;
+    vec4 r = uRip[i];
+    float a = atan(r.x, (r.y - 0.25) / 0.85);
+    da = wrapAngle(ang - a);
+    thick += s * 0.06 * exp(-r.z * 1.4) * exp(-da * da * 9.0);
+  }
+  thick += uLive2.z * 0.05 - 0.008;
+  float band = wall - thick + 0.003 * sin(ang * 21.0 + uTime * 1.7);
+  return max(smin(note, band, 0.07), -wall);
+}
+
+vec3 backdrop(vec2 uv, int scene) {
+  float r = length(uv);
+  if (scene == 1) return mix(vec3(0.87, 0.875, 0.885), vec3(0.7, 0.71, 0.73), smoothstep(0.2, 1.1, r));
+  if (scene == 2) return mix(vec3(0.45, 0.22, 0.16), vec3(0.05, 0.035, 0.07), smoothstep(-0.5, 0.6, uv.y + r * 0.3));
+  if (scene == 4) return vec3(0.008, 0.005, 0.014) + hsv(uLook.x, 0.8, 1.0) * 0.07 * exp(-r * r * 4.0);
+  return vec3(0.006, 0.007, 0.009) + vec3(0.025) * exp(-r * r * 3.0);
+}
+
+void main() {
+  vec2 screen = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y;
+  vec2 uv = (screen - uShift) / uZoom;
+  float k = uLook2.w;
+  int scene = int(uLook2.z + 0.5);
+  int mat = int(uLook2.y + 0.5);
+  float aa = 1.5 / (uRes.y * uZoom);
+
+  // The slab tilts with the camera: each layer sits at its own depth.
+  vec2 tilt = vec2(sin(uCam.x), -(uCam.y - 0.12)) * 0.05;
+  vec2 pLiquid = uv - tilt * 0.35;
+  vec2 pRim = uv - tilt;
+  vec2 pEcho = uv + tilt * 0.5;
+  float ink = scene == 1 ? -0.9 : 1.0;
+
+  vec3 col = backdrop(uv, scene);
+
+  // The bath around the tile: the glass walls' echoes, the hum of the bass, and a ripple per note.
+  float dO = tileDist(pEcho);
+  if (dO > 0.0 && scene != 3) {
+    float echoes = exp(-pow((dO - 0.016) / 0.002, 2.0)) * 0.28 + exp(-pow((dO - 0.036) / 0.0026, 2.0)) * 0.14
+      + exp(-pow((dO - 0.064) / 0.003, 2.0)) * 0.07;
+    float hum = sin(dO * 140.0 - uTime * 6.0) * exp(-dO * 9.0) * (0.015 + 0.08 * uLive.x * k);
+    vec3 lines = scene == 4 ? hsv(uLook.y, 0.75, 1.0) : vec3(1.0);
+    col += lines * (echoes + hum) * ink;
+    for (int i = 0; i < 12; i++) {
+      float s = uRipStr[i];
+      if (s <= 0.0) continue;
+      float age = uRip[i].z;
+      float r = 0.02 + age * 0.22;
+      float w = exp(-pow((dO - r) / (0.004 + age * 0.004), 2.0)) * exp(-age * 1.3) * s;
+      col += mix(vec3(1.0), hsv(uRip[i].w, 0.6, 1.0), 0.6) * w * 0.35 * ink;
+    }
+  }
+
+  // The dish floor is dark glass.
+  float dT = tileDist(pRim);
+  float inside = smoothstep(aa, -aa, dT);
+  vec3 floorCol = vec3(0.012, 0.013, 0.017) + hsv(uLook.x, 0.5, 1.0) * 0.015;
+  col = mix(col, floorCol, inside);
+
+  // Liquid, bent by the glass near the rim and split into colour there.
+  float dTL = tileDist(pLiquid);
+  vec2 n = tileNormal(pLiquid);
+  float edge = 1.0 - clamp(-dTL / 0.09, 0.0, 1.0);
+  vec2 refr = -n * 0.025 * edge * edge;
+  float spread = 0.0015 + 0.011 * edge * edge + 0.004 * uLive.z * k;
+  float blur = mat == 1 ? aa * 6.0 : aa;
+  vec2 q = pLiquid + refr;
+  // Four wavelengths, each bent a little differently, so edges split blue, cyan, amber and red.
+  float d0 = liquid(q - n * spread * 1.5);
+  float d1 = liquid(q - n * spread * 0.5);
+  float d2 = liquid(q + n * spread * 0.5);
+  float d3 = liquid(q + n * spread * 1.5);
+  float dG = 0.5 * (d1 + d2);
+  const vec3 C0 = vec3(0.12, 0.3, 1.0);
+  const vec3 C1 = vec3(0.25, 0.95, 1.0);
+  const vec3 C2 = vec3(1.0, 0.82, 0.5);
+  const vec3 C3 = vec3(1.0, 0.3, 0.2);
+  vec3 mask = (C0 * smoothstep(blur, -blur, d0) + C1 * smoothstep(blur, -blur, d1) + C2 * smoothstep(blur, -blur, d2)
+    + C3 * smoothstep(blur, -blur, d3)) / (C0 + C1 + C2 + C3);
+
+  vec2 e = vec2(0.0015, 0.0);
+  vec2 g = vec2(liquid(q + e.xy) - dG, liquid(q + e.yx) - dG) / e.x;
+  float height = smoothstep(0.0, 0.03, -dG);
+  vec3 nl = normalize(vec3(-g * (1.0 - height) * 1.4, 1.0));
+  float diff = clamp(dot(nl, normalize(vec3(-0.4, 0.5, 0.8))), 0.0, 1.0);
+  float spec = pow(clamp(dot(nl, normalize(vec3(-0.25, 0.35, 1.0))), 0.0, 1.0), 40.0);
+  vec3 tint = hsv(uLook.x, uLook.z, 1.0);
+  vec3 milk = vec3(0.93, 0.94, 0.96) * (0.8 + 0.2 * diff) * (0.86 + 0.14 * height) + spec * 0.25;
+  if (mat == 1) milk = mix(milk, vec3(0.8, 0.82, 0.86), 0.35);
+  if (mat == 2) milk *= mix(vec3(1.0), tint, 0.85);
+  if (mat == 3) {
+    float bands = smoothstep(0.35, 0.65, 0.5 + 0.5 * sin(nl.x * 7.0 + nl.y * 5.0 + 1.0));
+    milk = mix(vec3(0.12), vec3(1.0), bands) * mix(vec3(1.0), tint, 0.35) + spec * 0.6;
+  }
+  if (mat == 4) milk = vec3(0.03);
+  col = col * (1.0 - mask) + milk * mask;
+
+  // Thin-film colour where liquid meets the glass, strongest at the rim and when the highs are bright.
+  float film = exp(-pow(dG / 0.007, 2.0)) * (0.25 + 0.75 * edge) * (0.7 + 0.6 * uLive.z * k);
+  vec3 filmCol = 0.5 + 0.5 * cos(2.0 * PI * (vec3(0.0, 0.33, 0.67) + rimAngle(q) / (2.0 * PI) * 0.6 + dG * 30.0 + uLook.x));
+  if (mat == 4) {
+    film = exp(-pow(dG / 0.004, 2.0)) * (1.2 + 1.5 * uLive2.x * k);
+    filmCol = mix(hsv(uLook.x, 0.85, 1.0), hsv(uLook.y, 0.85, 1.0), 0.5 + 0.5 * sin(rimAngle(q)));
+  }
+  col += filmCol * film * 0.55 * inside;
+
+  // The glass rim: a bright iridescent edge, an inner bevel line and a faint sheen.
+  float rimAng = rimAngle(pRim) / (2.0 * PI);
+  vec3 rimTint = mix(vec3(1.0), 0.5 + 0.5 * cos(2.0 * PI * (vec3(0.0, 0.33, 0.67) + rimAng + uLook.x)), 0.55);
+  col += rimTint * exp(-pow(dT / 0.0022, 2.0)) * 0.9 * (scene == 1 ? 0.6 : 1.0);
+  col += vec3(0.35) * exp(-pow((dT + 0.011) / 0.0018, 2.0));
+  col += vec3(0.07) * smoothstep(-0.03, 0.0, dT) * smoothstep(0.004, 0.0, dT);
+  col += vec3(0.035) * inside * smoothstep(0.25, -0.35, dot(pRim, normalize(vec2(1.0, -1.0))));
+  col += tint * uLive.w * k * 0.05 * inside;
+
+  float vig = smoothstep(1.3, 0.35, length(screen * vec2(0.9, 1.1)));
+  col *= mix(scene == 1 ? 0.88 : 0.75, 1.0, vig);
+  col += (hash(gl_FragCoord.xy + fract(uTime)) - 0.5) * (2.0 / 255.0);
+  outColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+}`;
