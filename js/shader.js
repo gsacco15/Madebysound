@@ -531,14 +531,42 @@ float glassSlope(float inner) {
   return (1.0 - x) / sqrt(max(1.0 - (1.0 - x) * (1.0 - x), 0.02)) * 0.9;
 }
 
+// The speaker that drives the rig: a metal disc with six screws and a centre hole.
+vec3 transducer(vec2 p, vec3 under) {
+  float r = length(p);
+  if (r > 0.07) return under;
+  float a = atan(p.y, p.x);
+  vec3 metal = vec3(0.24, 0.245, 0.26) * (0.75 + 0.35 * smoothstep(0.066, 0.0, r)) + vec3(0.06) * sin(a * 2.0 + 1.0);
+  metal += vec3(0.25) * exp(-pow((r - 0.064) / 0.002, 2.0));
+  metal = mix(metal, vec3(0.42, 0.4, 0.36), smoothstep(0.03, 0.028, r) * smoothstep(0.012, 0.014, r));
+  metal = mix(metal, vec3(0.01), smoothstep(0.011, 0.009, r));
+  for (int i = 0; i < 6; i++) {
+    float sa = float(i) * PI / 3.0 + 0.5;
+    float sd = length(p - vec2(cos(sa), sin(sa)) * 0.048);
+    metal = mix(metal, vec3(0.55), smoothstep(0.0075, 0.006, sd));
+    metal = mix(metal, vec3(0.15), smoothstep(0.0025, 0.0015, sd));
+  }
+  return mix(under, metal, smoothstep(0.068, 0.065, r));
+}
+
 // The bath's floor: dark, with the note lying on it and the transducer under the middle.
 vec3 floorColor(vec2 p, float blur) {
   int mat = int(uLook2.y + 0.5);
+  bool rig = int(uLook2.z + 0.5) == 5;
   // Drawn a little narrower than the sculpture's layout, so the glyph stands upright in the tile.
-  float d = noteShape(p / NOTE_SCALE / vec2(NOTE_NARROW, 1.0)) * NOTE_SCALE * NOTE_NARROW;
+  // In the rig the note nearly fills the dish, as it does in the real one.
+  float scale = NOTE_SCALE * (rig ? 1.24 : 1.0);
+  float d = noteShape(p / scale / vec2(NOTE_NARROW, 1.0)) * scale * NOTE_NARROW;
+  // There the note is real liquid: where it runs close to the glass it wets the wall and joins it.
+  if (rig) d = smin(d, -tileDist(p) + 0.005, 0.12);
   float m = smoothstep(blur, -blur, d);
   float r = length(p);
   vec3 base = vec3(0.01, 0.011, 0.014) + vec3(0.025) * smoothstep(0.05, 0.045, r) * smoothstep(0.018, 0.024, r);
+  if (rig) {
+    base = transducer(p, vec3(0.012, 0.012, 0.014));
+    vec3 milk = vec3(0.86, 0.87, 0.88) * (0.8 + 0.2 * smoothstep(0.0, 0.03, -d));
+    return mix(base, milk, m);
+  }
   vec3 tint = hsv(uLook.x, uLook.z, 1.0);
   // A slightly domed white: soft grey just inside its edge, full white across the middle.
   vec3 ink = vec3(0.96, 0.965, 0.975) * (0.86 + 0.14 * smoothstep(0.0, 0.012, -d));
@@ -549,6 +577,24 @@ vec3 floorColor(vec2 p, float blur) {
     return base + neon * exp(-pow(d / 0.004, 2.0)) * (1.4 + 1.2 * uLive2.x * uLook2.w);
   }
   return mix(base, ink, m);
+}
+
+// The oil around the rig: a glossy black surface whose waves catch a large soft light as wavy lines.
+float rigOil(vec2 p) {
+  float k = uLook2.w;
+  float d = tileDist(p);
+  float a = atan(p.y, p.x);
+  float h = 0.004 * sin(d * 55.0 - uTime * 2.0 + sin(a * 3.0 + uTime * 0.5) * 1.5) * exp(-d * 3.0);
+  h += 0.002 * sin(d * 23.0 + a * 2.0 - uTime * 0.7);
+  h += (0.001 + 0.006 * uLive.x * k) * sin(d * 90.0 - uTime * 7.0) * exp(-d * 6.0);
+  for (int i = 0; i < 12; i++) {
+    float s = uRipStr[i];
+    if (s <= 0.0) continue;
+    float age = uRip[i].z;
+    float x = d - 0.02 - age * 0.22;
+    h += s * 0.004 * exp(-age * 1.3) * sin(x * 80.0) * exp(-x * x * 400.0);
+  }
+  return h;
 }
 
 vec3 backdrop(vec2 uv, int scene) {
@@ -578,9 +624,21 @@ void main() {
   vec2 slope = bathSlope(uv);
 
   vec3 col = backdrop(uv, scene);
+  bool rig = scene == 5;
+
+  if (rig && dT > -aa) {
+    vec2 e = vec2(0.0015, 0.0);
+    vec2 g = vec2(rigOil(uv + e.xy) - rigOil(uv - e.xy), rigOil(uv + e.yx) - rigOil(uv - e.yx)) / (2.0 * e.x);
+    vec3 on = normalize(vec3(-g * 3.0, 1.0));
+    float gloss = pow(max(dot(on, normalize(vec3(-0.25, 0.35, 1.0))), 0.0), 260.0);
+    gloss += 0.5 * pow(max(dot(on, normalize(vec3(0.35, -0.3, 1.0))), 0.0), 400.0);
+    gloss += 0.6 * pow(max(dot(on, normalize(vec3(-0.4, -0.15, 1.0))), 0.0), 300.0);
+    gloss += 0.4 * pow(max(dot(on, normalize(vec3(0.4, 0.2, 1.0))), 0.0), 300.0);
+    col = vec3(0.008, 0.008, 0.01) + vec3(0.85) * gloss;
+  }
 
   // Outside the tile: the oil, catching light on its waves and on the rounded rings the tile sends out.
-  if (dT > -aa) {
+  if (!rig && dT > -aa) {
     float echoes = exp(-pow((dT - 0.016) / 0.002, 2.0)) * 0.28 + exp(-pow((dT - 0.036) / 0.0026, 2.0)) * 0.14
       + exp(-pow((dT - 0.064) / 0.003, 2.0)) * 0.07;
     float hum = sin(dT * 140.0 - uTime * 6.0) * exp(-dT * 9.0) * (0.015 + 0.08 * uLive.x * k);
@@ -611,8 +669,8 @@ void main() {
     vec2 bathBend = -slope * depth * 0.22;
     vec2 base = uv + tilt * 0.6;
     // The glass splits colour far more than the thin oil does.
-    float glassSpread = 0.15 + uLook2.x * 1.5 + 0.06 * uLive.z * k;
-    float bathSpread = 0.05 + 0.05 * uLive.z * k;
+    float glassSpread = rig ? 0.015 : 0.15 + uLook2.x * 1.5 + 0.06 * uLive.z * k;
+    float bathSpread = rig ? 0.01 : 0.05 + 0.05 * uLive.z * k;
     float blur = mat == 1 ? aa * 6.0 + 0.004 : aa * 1.2;
     // Six wavelengths from deep blue to red, each bent by its own amount.
     const vec3 C0 = vec3(0.1, 0.12, 1.0);
@@ -629,25 +687,34 @@ void main() {
       / (C0 + C1 + C2 + C3 + C4 + C5);
     // Where the white reaches the very edge, the glass bends its last light warm: amber into red.
     float outer = smoothstep(0.028, 0.0, inner);
-    seen += dot(seen, vec3(0.333)) * outer * vec3(0.45, -0.25, -0.6);
+    if (!rig) seen += dot(seen, vec3(0.333)) * outer * vec3(0.45, -0.25, -0.6);
     if (mat == 1) seen = mix(seen, vec3(dot(seen, vec3(0.333))) + 0.06, 0.35);
     if (mat == 2) seen = mix(seen, seen * tint, 0.35);
 
     // The glass top: its rounded rim catches the light and a thin film of colour.
     vec3 gn = normalize(vec3(n * gs, 1.0));
     float fres = pow(1.0 - gn.z, 1.5);
-    vec3 film = 0.5 + 0.5 * cos(2.0 * PI * (vec3(0.0, 0.33, 0.67) + rimAngle(pg) / (2.0 * PI) + uLook.x + gs * 0.3));
-    seen += (film * 0.6 + 0.4) * fres * 0.45;
+    vec3 film = rig ? vec3(0.7) : 0.5 + 0.5 * cos(2.0 * PI * (vec3(0.0, 0.33, 0.67) + rimAngle(pg) / (2.0 * PI) + uLook.x + gs * 0.3));
+    seen += (film * 0.6 + 0.4) * fres * (rig ? 0.25 : 0.45);
+    // The rig's thick walls catch long streaks of light down their straight sides.
+    if (rig) seen += vec3(0.75) * exp(-pow((dT + 0.012) / 0.004, 2.0)) * pow(abs(n.x), 4.0);
     seen += vec3(0.3) * pow(max(dot(gn, normalize(L)), 0.0), 140.0) * smoothstep(0.0, 0.3, gs);
     seen += vec3(0.02) * smoothstep(0.25, -0.35, dot(pg, normalize(vec2(1.0, -1.0))));
     seen += tint * uLive.w * k * 0.04;
     col = mix(col, seen, inside);
   }
 
-  // The rim itself: a bright iridescent edge and an inner line where the rounding starts.
-  vec3 rimTint = mix(vec3(1.0), 0.5 + 0.5 * cos(2.0 * PI * (vec3(0.0, 0.33, 0.67) + rimAngle(pg) / (2.0 * PI) + uLook.x)), 0.55);
+  // The rim itself: a bright edge and an inner line where the rounding starts.
+  vec3 rimTint = rig ? vec3(0.8) : mix(vec3(1.0), 0.5 + 0.5 * cos(2.0 * PI * (vec3(0.0, 0.33, 0.67) + rimAngle(pg) / (2.0 * PI) + uLook.x)), 0.55);
   col += rimTint * exp(-pow(dT / 0.0022, 2.0)) * 0.9 * (scene == 1 ? 0.6 : 1.0);
   col += vec3(0.18) * exp(-pow((dT + BEVEL) / 0.002, 2.0));
+  if (rig) {
+    // The dish's thick outer wall: clear glass with bright lines along its faces.
+    vec2 n = tileNormal(pg);
+    float wall = smoothstep(0.0, 0.004, dT) * smoothstep(0.05, 0.044, dT);
+    col += vec3(0.04) * wall;
+    col += vec3(0.7) * (exp(-pow((dT - 0.012) / 0.003, 2.0)) + 0.6 * exp(-pow((dT - 0.04) / 0.003, 2.0))) * (0.35 + 0.65 * pow(abs(n.x), 3.0));
+  }
 
   float vig = smoothstep(1.3, 0.35, length(screen * vec2(0.9, 1.1)));
   col *= mix(scene == 1 ? 0.88 : 0.75, 1.0, vig);

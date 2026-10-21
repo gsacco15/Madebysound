@@ -68,8 +68,10 @@ the bath.
 - **Generate**: while a song is analysed the glass goes molten and ripples form; it then sets into the
   new note with a soft chime on the song's own tonic chord.
 - **Song tags**: title, artist, genre and cover art are read from MP3 (ID3v2), M4A, FLAC and WAV files.
-- **Studio**: five materials (clear, frosted, song tint, liquid metal, neon edge), five scenes (oil bath,
-  studio, dusk, void, neon club), glass color from the key, the album art or your own hue, sound
+- **Studio**: five materials (clear, frosted, song tint, liquid metal, neon edge), six scenes (oil bath,
+  studio, dusk, void, neon club, and *Making of*, which shows the Tile view as the physical rig: a thick
+  glass dish in glossy black oil, the note as milky liquid that wets the glass where it comes close, and
+  the transducer showing through the gap under the beam), glass color from the key, the album art or your own hue, sound
   influence, ripples, slow turn, beat haptics (where the browser supports vibration) and ambient mode
   (full screen, nothing but the note, screen kept awake).
 - **Collection**: keep notes in this browser (features plus a thumbnail; the DNA is rebuilt on load).

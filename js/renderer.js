@@ -22,6 +22,7 @@ export const SCENES = [
   { id: 'dusk', label: 'Dusk' },
   { id: 'void', label: 'Void' },
   { id: 'club', label: 'Neon club' },
+  { id: 'rig', label: 'Making of' },
 ];
 
 const UNIFORMS = [
