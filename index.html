@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- APP:HEAD -->
+<title>madebysound</title>
+<meta name="description" content="Every song sculpts its own liquid-glass music note.">
+<meta name="theme-color" content="#07080b">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&family=Geist:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap">
+<!-- APP:END-HEAD -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="madebysound">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<!-- APP:BODY -->
+<canvas id="stage" class="stage" role="img" aria-label="The song's glass note. Drag to turn it, scroll or pinch to zoom."></canvas>
+
+<div class="fallback" id="fallback" hidden>
+  <p class="fallback-title">This browser can't draw the glass note.</p>
+  <p>madebysound needs WebGL 2. Try a recent Safari, Chrome, Edge or Firefox, or turn hardware acceleration back on.</p>
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <p class="wordmark" aria-label="madebysound">made<em>by</em>sound</p>
+    <p class="tagline">Every song sculpts its own note</p>
+  </div>
+  <nav class="tabs" aria-label="Panels">
+    <button class="tab" type="button" data-panel="note" aria-controls="panel-note" aria-expanded="false" aria-label="How it was made">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V9m4 9V5m4 13v-6m4 6V8m4 10v-3"/></svg>
+      <span class="tab-label">How it was made</span>
+    </button>
+    <button class="tab" type="button" data-panel="studio" aria-controls="panel-studio" aria-expanded="false" aria-label="Studio">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10m4 0h2M4 17h4m4 0h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+      <span class="tab-label">Studio</span>
+    </button>
+    <button class="tab" type="button" data-panel="collection" aria-controls="panel-collection" aria-expanded="false" aria-label="Collection">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></svg>
+      <span class="tab-label">Collection</span>
+      <span class="tab-count" id="collection-count">0</span>
+    </button>
+  </nav>
+</header>
+
+<aside class="panel" id="panel-note" aria-labelledby="note-heading" hidden>
+  <div class="panel-head">
+    <h2 id="note-heading">How this note was made</h2>
+    <button class="icon-btn" type="button" data-close aria-label="Close panel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="panel-body">
+    <p class="lede">madebysound listened to the whole song before it shaped this glass. The same song always makes the same note.</p>
+    <dl class="readout" id="readout"></dl>
+    <section class="block">
+      <h3>Loudness over the song</h3>
+      <canvas class="env-chart" id="env-chart"></canvas>
+      <p class="hint">Engraved along the stems: the first half of the song runs up the left stem, the second half up the right.</p>
+    </section>
+    <section class="block">
+      <h3>Where the energy sits</h3>
+      <div class="bands" id="bands"></div>
+    </section>
+    <section class="block">
+      <h3>A ripple for every note</h3>
+      <canvas class="wheel" id="wheel" width="400" height="400"></canvas>
+      <p class="hint">While a song plays, each note you hear drops a ripple in its pitch's color, from that pitch's place around the bath. Pitches a fifth apart sit side by side.</p>
+    </section>
+  </div>
+</aside>
+
+<aside class="panel" id="panel-studio" aria-labelledby="studio-heading" hidden>
+  <div class="panel-head">
+    <h2 id="studio-heading">Studio</h2>
+    <button class="icon-btn" type="button" data-close aria-label="Close panel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="panel-body">
+    <fieldset class="choice">
+      <legend>Material</legend>
+      <div class="chips" id="materials"></div>
+    </fieldset>
+    <fieldset class="choice">
+      <legend>Scene</legend>
+      <div class="chips" id="scenes"></div>
+    </fieldset>
+    <div class="field">
+      <div class="field-row"><label for="influence">Sound influence</label><output id="influence-out" for="influence">70%</output></div>
+      <input type="range" id="influence" min="0" max="100" step="1" value="70">
+      <p class="hint">How hard the music pushes the glass while it plays.</p>
+    </div>
+    <label class="switch"><input type="checkbox" id="ripples-toggle" checked><span>Ripples for every note</span></label>
+    <label class="switch"><input type="checkbox" id="turn-toggle" checked><span>Slow turn</span></label>
+    <p class="hint">Drag the note to turn it. Scroll or pinch to zoom. Double-click to reset the view.</p>
+  </div>
+</aside>
+
+<aside class="panel" id="panel-collection" aria-labelledby="collection-heading" hidden>
+  <div class="panel-head">
+    <h2 id="collection-heading">Collection</h2>
+    <button class="icon-btn" type="button" data-close aria-label="Close panel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="panel-body">
+    <p class="lede" id="collection-empty">Notes you keep land here. Play a song, then press Keep.</p>
+    <ul class="grid" id="collection-grid"></ul>
+    <p class="hint">Kept in this browser only. Saved notes show their glass; open the song again to hear it.</p>
+  </div>
+</aside>
+
+<section class="dock" aria-label="Player">
+  <div class="dock-card" id="dock">
+    <div class="now">
+      <button class="play" id="play" type="button" aria-label="Play">
+        <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>
+        <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>
+        <span class="spinner" aria-hidden="true"></span>
+      </button>
+      <div class="titles">
+        <p class="note-id" id="note-id">&nbsp;</p>
+        <h1 class="song" id="song-title">&nbsp;</h1>
+        <p class="song-meta" id="song-meta">&nbsp;</p>
+      </div>
+      <div class="actions">
+        <button class="act" id="keep" type="button" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16l-5-4-5 4z"/></svg><span>Keep</span>
+        </button>
+        <button class="act" id="save-card" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 15h8M8 18h5"/><circle cx="12" cy="9" r="3"/></svg><span>Card</span>
+        </button>
+        <button class="act" id="record" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3" class="fill"/></svg><span id="record-label">Clip</span>
+        </button>
+        <button class="act" id="capture" type="button" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10m-4-4l4 4 4-4M5 19h14"/></svg><span id="capture-label">Make a note</span>
+        </button>
+      </div>
+    </div>
+    <div class="scrub">
+      <span class="time" id="time-now">0:00</span>
+      <div class="track">
+        <canvas id="track-wave" aria-hidden="true"></canvas>
+        <input type="range" id="seek" min="0" max="1000" step="1" value="0" aria-label="Position in song">
+      </div>
+      <span class="time" id="time-total">0:00</span>
+    </div>
+    <div class="sources">
+      <button class="source primary" id="open" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m-5 5l5-5 5 5M5 20h14"/></svg>Open a song
+      </button>
+      <input type="file" id="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus,.aif,.aiff" hidden>
+      <div class="demos" id="demos" role="group" aria-label="Demo songs"></div>
+      <button class="source" id="listen" type="button" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4"/></svg><span id="listen-label">Listen</span>
+      </button>
+    </div>
+  </div>
+</section>
+
+<div class="busy" id="busy" role="status" aria-live="polite" hidden>
+  <p class="busy-title" id="busy-title">Listening to the whole song</p>
+  <div class="busy-bar"><span id="busy-fill"></span></div>
+  <p class="busy-step" id="busy-step">Reading the file</p>
+</div>
+<div class="drop" id="drop" hidden><p>Drop a song to make its note</p></div>
+<p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
+<!-- APP:END-BODY -->
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
