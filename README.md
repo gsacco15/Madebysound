@@ -48,8 +48,8 @@ differences between browsers don't change a song's note.
 
 While a song plays, `js/audio-engine.js` listens live: bass swells the heads, mids send waves through the
 glass, highs shimmer on the surface and ripple the beam, beats pulse the whole form, and each detected
-onset takes its pitch class from the spectrum and drops a colored ripple from that pitch's place around
-the bath.
+onset takes its pitch class from the spectrum and, in the Sculpture view, drops a colored ripple from
+that pitch's place around the bath.
 
 ## What's in the app
 
@@ -57,9 +57,10 @@ the bath.
   zoom, double-click to reset.
   - *Tile* (default): looking straight down through a glass tile that rests above a shallow bath of oil,
     at the white note lying on the bath's floor, the way the physical piece was filmed. The note never
-    moves; sound moves the oil. Bass pumps rings from a transducer under the middle, the song's two
-    strongest pitches sound from their places on the pitch wheel around the rim and their waves
-    interfere, each note you hear sends a ring across from its own place, and highs shimmer. The glass's
+    moves; sound moves the oil, and as in the real rig every wave starts from the transducer under the
+    middle. Bass pumps rings outward, the song's two strongest pitches ring out at their own wavelengths
+    and beat against each other, each note you hear sends one more ring out past the tile, and highs
+    shimmer. The glass's
     rounded rim acts as a lens that draws the note out toward the edges, and each wavelength bends a
     little differently, so edges split into blue, cyan, amber and red.
   - *Sculpture*: the note as free-standing raymarched glass with refraction, dispersion, thin-film

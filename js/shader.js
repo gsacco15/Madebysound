@@ -449,10 +449,6 @@ float rimAngle(vec2 p) {
   return atan(p.x, -p.y);
 }
 
-vec2 rimPoint(float a) {
-  return vec2(sin(a), -cos(a)) * 0.31;
-}
-
 float ellipse(vec2 p, vec2 r) {
   float k0 = length(p / r);
   float k1 = length(p / (r * r));
@@ -509,20 +505,19 @@ float bath(vec2 p) {
   float r = length(p);
   // The transducer under the middle pumps rings outward with the bass and kicks on each beat.
   float h = (0.0003 + 0.0075 * uLive.x * uLive.x * k + 0.004 * uLive.w * k) * sin(r * 46.0 - t * 6.0) / sqrt(1.0 + r * 8.0);
-  // The song's two strongest pitches sound from their places on the rim; their waves cross and interfere.
+  // The song's two strongest pitches ring out from the same place, each at its own wavelength, so their
+  // rings beat against each other.
   float level = 0.00015 + 0.006 * pow(uLive2.x * k, 1.5);
-  h += wave(p, rimPoint(uTile.x), 36.0 + 36.0 * fract(uTile.x / (2.0 * PI)), 3.0, level * uTile.z * 12.0);
-  h += wave(p, rimPoint(uTile.y), 36.0 + 36.0 * fract(uTile.y / (2.0 * PI)), 3.4, level * uTile.w * 12.0);
+  h += wave(p, vec2(0.0), 36.0 + 36.0 * fract(uTile.x / (2.0 * PI)), 3.0, level * uTile.z * 12.0);
+  h += wave(p, vec2(0.0), 36.0 + 36.0 * fract(uTile.y / (2.0 * PI)), 3.4, level * uTile.w * 12.0);
   // The song's frozen ripples, a slow standing pattern.
   h += uSurf.y * 0.06 * sin(r * uSurf.x * 3.0) * cos(t * 0.6);
-  // Each note you hear sends a ring across the bath from its pitch's place on the rim.
+  // Each note you hear sends a ring out from the middle.
   for (int i = 0; i < 12; i++) {
     float s = uRipStr[i];
     if (s <= 0.0) continue;
-    vec4 q = uRip[i];
-    float a = atan(q.x, (q.y - 0.25) / 0.85);
-    float x = length(p - rimPoint(a)) - q.z * 0.3;
-    h += s * 0.006 * exp(-q.z * 1.6) * sin(x * 70.0) * exp(-x * x * 300.0);
+    float x = r - uRip[i].z * 0.3;
+    h += s * 0.006 * exp(-uRip[i].z * 1.6) * sin(x * 70.0) * exp(-x * x * 300.0);
   }
   h += shimmer(p);
   // While a new song is being listened to, the bath churns.
@@ -615,19 +610,18 @@ float oilHeight(vec2 p) {
   float d = max(tileDist(p), 0.0);
   float a = atan(p.y, p.x);
   // A slow swell, so the surface is never perfectly flat.
-  float h = 0.0022 * sin(p.x * 4.0 + t * 0.35) * sin(p.y * 3.3 - t * 0.28) + 0.0012 * sin(d * 23.0 + a * 2.0 - t * 0.7);
+  float h = 0.0022 * sin(p.x * 4.0 + t * 0.35) * sin(p.y * 3.3 - t * 0.28) + 0.0012 * sin(d * 23.0 - t * 0.7);
   // The tile hums with the music and sends rounded rings outward; the bass drives them.
   float drive = 0.0007 + 0.006 * uLive.x * uLive.x * k + 0.003 * uLive2.x * k;
-  h += drive * sin(d * 48.0 - t * 4.5 + sin(a * 3.0 + t * 0.5) * 0.8) * exp(-d * 2.2);
+  h += drive * sin(d * 48.0 - t * 4.5 + sin(a * 3.0 + t * 0.5) * 0.3) * exp(-d * 2.2);
   h += drive * 0.45 * sin(d * 95.0 - t * 8.0) * exp(-d * 6.0);
-  // Each note you hear sends a ripple out from its pitch's place on the rim.
+  // Each note's ring, having crossed the bath under the glass, carries on out past the tile.
   for (int i = 0; i < 12; i++) {
     float s = uRipStr[i];
     if (s <= 0.0) continue;
-    vec4 q = uRip[i];
-    float ra = atan(q.x, (q.y - 0.25) / 0.85);
-    float x = length(p - vec2(sin(ra), -cos(ra)) * 0.36) - q.z * 0.28;
-    h += s * 0.005 * exp(-q.z * 1.2) * sin(x * 70.0) * exp(-x * x * 120.0);
+    float age = uRip[i].z;
+    float x = d + 0.34 - age * 0.3;
+    h += s * 0.005 * exp(-max(age - 1.0, 0.0) * 1.2) * sin(x * 70.0) * exp(-x * x * 120.0);
   }
   // A big hit: one strong wave rolls out from the tile.
   float sx = d - uFx.y * 0.5;

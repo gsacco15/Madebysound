@@ -22,6 +22,7 @@ export class AudioEngine {
     this.lastImpact = -99;
     this.shortLevel = 0;
     this.longLevel = 0;
+    this.activeSince = -1;
     this.live = { bass: 0, mid: 0, high: 0, beat: 0, level: 0, active: false };
     this.peaks = { bass: 1e-3, mid: 1e-3, high: 1e-3 };
     this.fluxHistory = [];
@@ -242,6 +243,7 @@ export class AudioEngine {
     const live = this.live;
     live.active = !!this.ctx && (this.playing || this.listening);
     if (!live.active) {
+      this.activeSince = -1;
       const fade = Math.exp(-dt * 3);
       live.bass *= fade;
       live.mid *= fade;
@@ -251,6 +253,7 @@ export class AudioEngine {
       return live;
     }
 
+    if (this.activeSince < 0) this.activeSince = now;
     this.analyser.getFloatFrequencyData(this.freq);
     this.analyser.getFloatTimeDomainData(this.wave);
     const binHz = this.ctx.sampleRate / this.analyser.fftSize;
@@ -284,7 +287,8 @@ export class AudioEngine {
     const rmsDb = 20 * Math.log10(rms + 1e-9);
     const gate = clamp01((rmsDb + 62) / 20);
     this.shortLevel += (rms - this.shortLevel) * (1 - Math.exp(-dt / 0.12));
-    this.longLevel += (rms - this.longLevel) * (1 - Math.exp(-dt / 4));
+    // Over the first seconds the long level averages everything heard so far, so it settles quickly.
+    this.longLevel += (rms - this.longLevel) * (1 - Math.exp(-dt / Math.min(4, 0.3 + now - this.activeSince)));
 
     const attack = 1 - Math.exp(-dt / 0.03);
     const release = 1 - Math.exp(-dt / 0.22);
@@ -305,7 +309,9 @@ export class AudioEngine {
       this.onBeat();
       const surge = this.shortLevel / (this.longLevel + 1e-4);
       const strength = clamp01((surge - 1.3) / 1.2);
-      if (strength > 0.3 && now - this.lastImpact > 1.5) {
+      // Until the long level has settled, every beat would look like a surge.
+      const settled = now - this.activeSince > 3;
+      if (settled && strength > 0.3 && now - this.lastImpact > 1.5) {
         this.impact = strength;
         this.lastImpact = now;
         this.onImpact(strength);
