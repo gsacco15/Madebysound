@@ -492,6 +492,11 @@ float wrapAngle(float a) {
   return mod(a + PI, 2.0 * PI) - PI;
 }
 
+// Highs shimmer across the surface.
+float shimmer(vec2 p) {
+  return (0.00015 + 0.0015 * uLive.z * uLook2.w) * sin(p.x * 95.0 + uTime * 4.0) * sin(p.y * 88.0 - uTime * 3.3);
+}
+
 float wave(vec2 p, vec2 c, float k, float speed, float amp) {
   float d = length(p - c);
   return amp * sin(d * k - uTime * speed) / sqrt(1.0 + d * 6.0);
@@ -519,8 +524,7 @@ float bath(vec2 p) {
     float x = length(p - rimPoint(a)) - q.z * 0.3;
     h += s * 0.006 * exp(-q.z * 1.6) * sin(x * 70.0) * exp(-x * x * 300.0);
   }
-  // Highs shimmer across the surface.
-  h += (0.00015 + 0.0015 * uLive.z * k) * sin(p.x * 95.0 + t * 4.0) * sin(p.y * 88.0 - t * 3.3);
+  h += shimmer(p);
   // While a new song is being listened to, the bath churns.
   h += uLive2.z * 0.02 * sin(r * 30.0 - t * 4.0) * sin(atan(p.y, p.x) * 5.0 + t);
   // A big hit: the transducer kicks and one strong ring races out across the bath.
@@ -529,7 +533,8 @@ float bath(vec2 p) {
   return h;
 }
 
-// Slope (xy) and curvature (z) of the surface. Curvature is what focuses light into caustics.
+// Slope (xy) and curvature (z) of the surface. Curvature is what focuses light into caustics; the fine
+// shimmer is left out of it, since it would only speckle the light.
 vec3 bathField(vec2 p) {
   vec2 e = vec2(0.0015, 0.0);
   float c = bath(p);
@@ -537,23 +542,16 @@ vec3 bathField(vec2 p) {
   float x1 = bath(p + e.xy);
   float y0 = bath(p - e.yx);
   float y1 = bath(p + e.yx);
-  return vec3((x1 - x0) / (2.0 * e.x), (y1 - y0) / (2.0 * e.x), (x0 + x1 + y0 + y1 - 4.0 * c) / (e.x * e.x));
+  float curve = (x0 + x1 + y0 + y1 - 4.0 * c) / (e.x * e.x) + (95.0 * 95.0 + 88.0 * 88.0) * shimmer(p);
+  return vec3((x1 - x0) / (2.0 * e.x), (y1 - y0) / (2.0 * e.x), curve);
 }
 
-// Caustics: light through the moving surface gathers into a web of thin bright lines on the floor.
-// The web is traced along the zero-crossings of two slowly warping wave fields; the bath's real
-// waves push it around, and the music makes it livelier and brighter.
-float caustics(vec2 p, vec2 slope) {
-  float k = uLook2.w;
-  float t = uTime * (0.6 + 0.8 * uLive2.x * k);
-  vec2 q = p * 11.0 + slope * 14.0;
-  q += vec2(sin(q.y * 0.6 + t * 0.8), cos(q.x * 0.55 - t * 0.7)) * 0.9;
-  float w1 = sin(q.x + t * 0.9) + sin(q.y * 1.1 - t * 0.7) + sin((q.x + q.y) * 0.8 + t * 0.5);
-  vec2 r = mat2(0.8, -0.6, 0.6, 0.8) * q * 1.35;
-  float w2 = sin(r.x - t * 0.6) + sin(r.y + t * 0.8);
-  float lines = pow(max(1.0 - abs(w1) / 3.0, 0.0), 8.0) + 0.7 * pow(max(1.0 - abs(w2) / 2.0, 0.0), 10.0);
-  float strength = 0.35 + 0.6 * uLive2.x * k + 0.5 * uLive.x * k + 1.2 * uFx.x * exp(-uFx.y * 2.0);
-  return lines * strength;
+// Caustics: the moving oil acts as a lens on the light falling through it. Where its surface bulges up
+// it gathers light onto the floor below, where it dips it spreads it, so every ripple the sound makes is
+// cast as a band of light. A still bath casts none.
+float caustics(float curve) {
+  float gather = 1.0 / max(1.0 + curve * 0.014, 0.3) - 1.0;
+  return gather * (1.0 + 1.5 * uFx.x * exp(-uFx.y * 2.0));
 }
 
 // Slope of the glass's top: flat in the middle, rounding down steeply at the rim.
@@ -591,8 +589,7 @@ vec3 floorColor(vec2 p, float blur) {
   // There the note is real liquid: where it runs close to the glass it wets the wall and joins it.
   if (rig) d = smin(d, -tileDist(p) + 0.005, 0.12);
   float m = smoothstep(blur, -blur, d);
-  float r = length(p);
-  vec3 base = vec3(0.01, 0.011, 0.014) + vec3(0.025) * smoothstep(0.05, 0.045, r) * smoothstep(0.018, 0.024, r);
+  vec3 base = vec3(0.01, 0.011, 0.014);
   if (rig) {
     base = transducer(p, vec3(0.012, 0.012, 0.014));
     vec3 milk = vec3(0.86, 0.87, 0.88) * (0.8 + 0.2 * smoothstep(0.0, 0.03, -d));
@@ -756,11 +753,8 @@ void main() {
       + C2 * floorColor(base0 + split * 0.2, blur) + C3 * floorColor(base0 - split * 0.2, blur)
       + C4 * floorColor(base0 - split * 0.6, blur) + C5 * floorColor(base0 - split * 1.0, blur))
       / (C0 + C1 + C2 + C3 + C4 + C5);
-    // Caustic light from the moving oil plays over the note and, faintly, the dark floor.
-    float caus = caustics(base0, slope);
-    float lum = dot(seen, vec3(0.333));
-    seen *= mix(1.0, 0.93 + (rig ? 0.08 : 0.14) * caus, smoothstep(0.2, 0.8, lum));
-    seen += (rig ? vec3(0.8) : vec3(0.6, 0.78, 1.0)) * caus * 0.07 * (1.0 - smoothstep(0.2, 0.6, lum));
+    // Caustic light from the moving oil plays over the note. The black floor absorbs it, so none shows there.
+    seen *= 1.0 + caustics(field.z) * (rig ? 0.35 : 1.0);
     // A big hit flashes light up through the glass.
     seen += mix(vec3(1.0), tint, 0.4) * uFx.x * k * exp(-uFx.y * 6.0) * 0.22;
 
