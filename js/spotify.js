@@ -3,14 +3,15 @@
 // analysis to new apps, so the glass itself is shaped by what the microphone hears.
 
 // The Client ID from https://developer.spotify.com/dashboard. It is public; the Client Secret is never used.
-export const SPOTIFY_CLIENT_ID = '';
+export const SPOTIFY_CLIENT_ID = 'f9e6acd0a3364f31979b0733b1fb829c';
 
 const SCOPES = 'user-read-currently-playing user-read-playback-state';
 const STORE = 'madebysound.spotify.v1';
 const PENDING = 'madebysound.spotify.pending';
 
-// Must match a Redirect URI in the Spotify dashboard exactly, e.g. http://127.0.0.1:5173/
-export const redirectUri = () => `${location.origin}${location.pathname}`;
+// Must match a Redirect URI in the Spotify dashboard exactly. At the site root that is the bare origin,
+// e.g. https://madebysound.vercel.app or http://127.0.0.1:5173, with no trailing slash.
+export const redirectUri = () => `${location.origin}${location.pathname === '/' ? '' : location.pathname}`;
 
 export const spotifyAvailable = () => !!SPOTIFY_CLIENT_ID && window.isSecureContext;
 

@@ -105,13 +105,14 @@ microphone so the glass moves with the song. *Make a note* then captures 12 seco
 the Spotify track's name.
 
 1. Create an app at <https://developer.spotify.com/dashboard> with the **Web API**.
-2. Add redirect URIs that match where you run the app exactly, for example `http://127.0.0.1:5173/`
-   (Spotify accepts plain `http` only for `127.0.0.1`, not `localhost`) and
-   your Vercel address, such as `https://madebysound.vercel.app/`.
+2. Add redirect URIs that match where you run the app exactly. At the site root that is the bare origin
+   with no trailing slash: `https://madebysound.vercel.app`, and for local runs `http://127.0.0.1:5173`
+   (Spotify accepts plain `http` only for `127.0.0.1`, not `localhost`).
 3. Put the app's **Client ID** in `SPOTIFY_CLIENT_ID` in `js/spotify.js`. Sign-in uses PKCE, so the Client
    Secret is never needed and must not go in the code.
 
-The Spotify button stays hidden until a Client ID is set.
+The app's Client ID is already set. While the Spotify app is in development mode, only its owner and the
+people added under **User Management** in the Spotify dashboard can connect.
 
 ## Project layout
 
