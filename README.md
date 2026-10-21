@@ -55,11 +55,13 @@ the bath.
 
 - **Two views** (`js/shader.js`), both shaped by the same DNA. Drag to turn or tilt, scroll or pinch to
   zoom, double-click to reset.
-  - *Tile* (default): looking straight down into a glass tile on a dark bath, the way the physical piece was
-    filmed. The note is a white liquid. The song's two strongest pitches pull liquid up the glass at their
-    places on the pitch wheel, louder stretches swell it, bass sloshes it around, every note you hear
-    pushes liquid toward its own pitch's place and sends a rounded ripple out through the bath, and the
-    glass splits light into spectral fringes where liquid meets the rim.
+  - *Tile* (default): looking straight down through a glass tile that rests above a shallow bath of oil,
+    at the white note lying on the bath's floor, the way the physical piece was filmed. The note never
+    moves; sound moves the oil. Bass pumps rings from a transducer under the middle, the song's two
+    strongest pitches sound from their places on the pitch wheel around the rim and their waves
+    interfere, each note you hear sends a ring across from its own place, and highs shimmer. The glass's
+    rounded rim acts as a lens that draws the note out toward the edges, and each wavelength bends a
+    little differently, so edges split into blue, cyan, amber and red.
   - *Sculpture*: the note as free-standing raymarched glass with refraction, dispersion, thin-film
     iridescence and a rippling oil bath.
 - **How it was made**: the readout above, the loudness curve, band energy and the pitch-color wheel.

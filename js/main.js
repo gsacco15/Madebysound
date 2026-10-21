@@ -703,10 +703,10 @@ function renderReadout() {
   drawWheel();
   const tile = settings.view === 'tile';
   els.envHint.textContent = tile
-    ? 'The louder stretches make the liquid at the rim swell. In the sculpture this curve is engraved along the stems.'
+    ? "Shapes the note's stems. A song with more dynamic range lies deeper in the bath, so its waves bend the note further. In the sculpture this curve is engraved along the stems."
     : 'Engraved along the stems: the first half of the song runs up the left stem, the second half up the right.';
   els.wheelHint.textContent = tile
-    ? "The song's two strongest pitches pull liquid up the glass at their places on this wheel. While it plays, each note you hear pushes liquid toward its own place and sends a ripple out from the tile."
+    ? "The song's two strongest pitches sound from their places on this wheel around the rim, and their waves cross over the note. Bass pumps rings from the middle, and each note you hear sends a ring from its own place."
     : "While a song plays, each note you hear drops a ripple in its pitch's color, from that pitch's place around the bath. Pitches a fifth apart sit side by side.";
 }
 
