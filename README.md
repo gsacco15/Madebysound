@@ -88,8 +88,9 @@ the bath.
 
 Live levels run through critically damped springs, so the glass has weight and never jitters. A soft glow
 blooms from the brightest light (white, the rim and colour fringes), drawn by blurring the frame's
-highlights at several sizes; cards, wallpapers and clips get it too. In the Tile view the moving oil
-casts caustics, a web of light lines over the floor and the note that livens with the music. Big hits,
+highlights at several sizes; cards, wallpapers and clips get it too. Outside the tile the oil is a real
+glossy surface: its rings, ripples and swells have no colour of their own and show only through the
+light they reflect, as in the filmed rig. In the Tile view the moving oil also casts caustics, a web of light lines over the floor and the note that livens with the music. Big hits,
 beats that land well above the recent loudness like a drop after a quiet build, send a shockwave across
 the oil, flash light through the glass and swell the glow. Rendering resolution adapts to keep the frame
 rate up on phones.

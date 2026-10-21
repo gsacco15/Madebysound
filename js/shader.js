@@ -231,7 +231,6 @@ vec2 rippleField(vec2 xz, out vec3 glow) {
   float sx = r0 - 0.4 - uFx.y * 2.2;
   float senv = uFx.x * exp(-uFx.y * 0.9) * exp(-sx * sx * 3.0);
   g += (xz / r0) * senv * (14.0 * cos(sx * 14.0) - 6.0 * sx * sin(sx * 14.0)) * 0.045;
-  glow += vec3(1.0) * senv * 0.3 * (0.5 + 0.5 * cos(sx * 14.0));
   if (uLive2.w < 0.5) return g;
   for (int i = 0; i < 12; i++) {
     float s = uRipStr[i];
@@ -260,15 +259,14 @@ vec3 floorShade(vec3 ro, vec3 rd, float t) {
   float dist = length(p.xz);
   float shade = 1.0 - 0.55 * exp(-dist * dist * 0.9);
   vec3 col;
+  // Ripples show through what they reflect. Only the neon club's crests carry colour: its tubes' light.
   if (scene == 1) {
     col = vec3(0.8, 0.8, 0.83) * shade + refl * fres * 0.25;
-    col = mix(col, col * (0.55 + 0.45 * normalize(glow + 1e-3)), clamp(length(glow), 0.0, 1.0) * 0.5);
   } else if (scene == 2) {
     col = vec3(0.04, 0.025, 0.05) + refl * fres * shade;
-    col += glow * 0.22;
   } else {
     col = vec3(0.003, 0.004, 0.006) + refl * fres * (0.4 + 0.6 * shade);
-    col += glow * (scene == 4 ? 0.4 : 0.24);
+    if (scene == 4) col += glow * 0.3;
   }
   return mix(col, sky(rd, false), smoothstep(10.0, 40.0, t));
 }
@@ -612,22 +610,71 @@ vec3 floorColor(vec2 p, float blur) {
   return mix(base, ink, m);
 }
 
-// The oil around the rig: a glossy black surface whose waves catch a large soft light as wavy lines.
-float rigOil(vec2 p) {
+// The oil around the tile. Nothing here is drawn as a line or a colour: the surface only has height,
+// and its waves show the way real oil does, by bending the reflections of the lights above it.
+float oilHeight(vec2 p) {
   float k = uLook2.w;
-  float d = tileDist(p);
+  float t = uTime;
+  float d = max(tileDist(p), 0.0);
   float a = atan(p.y, p.x);
-  float h = 0.004 * sin(d * 55.0 - uTime * 2.0 + sin(a * 3.0 + uTime * 0.5) * 1.5) * exp(-d * 3.0);
-  h += 0.002 * sin(d * 23.0 + a * 2.0 - uTime * 0.7);
-  h += (0.001 + 0.006 * uLive.x * k) * sin(d * 90.0 - uTime * 7.0) * exp(-d * 6.0);
+  // A slow swell, so the surface is never perfectly flat.
+  float h = 0.0022 * sin(p.x * 4.0 + t * 0.35) * sin(p.y * 3.3 - t * 0.28) + 0.0012 * sin(d * 23.0 + a * 2.0 - t * 0.7);
+  // The tile hums with the music and sends rounded rings outward; the bass drives them.
+  float drive = 0.0014 + 0.006 * uLive.x * k + 0.003 * uLive2.x * k;
+  h += drive * sin(d * 48.0 - t * 4.5 + sin(a * 3.0 + t * 0.5) * 0.8) * exp(-d * 2.2);
+  h += drive * 0.45 * sin(d * 95.0 - t * 8.0) * exp(-d * 6.0);
+  // Each note you hear sends a ripple out from its pitch's place on the rim.
   for (int i = 0; i < 12; i++) {
     float s = uRipStr[i];
     if (s <= 0.0) continue;
-    float age = uRip[i].z;
-    float x = d - 0.02 - age * 0.22;
-    h += s * 0.004 * exp(-age * 1.3) * sin(x * 80.0) * exp(-x * x * 400.0);
+    vec4 q = uRip[i];
+    float ra = atan(q.x, (q.y - 0.25) / 0.85);
+    float x = length(p - vec2(sin(ra), -cos(ra)) * 0.36) - q.z * 0.28;
+    h += s * 0.005 * exp(-q.z * 1.2) * sin(x * 70.0) * exp(-x * x * 120.0);
   }
+  // A big hit: one strong wave rolls out from the tile.
+  float sx = d - uFx.y * 0.5;
+  h += uFx.x * k * 0.012 * exp(-uFx.y * 1.1) * sin(sx * 40.0) * exp(-sx * sx * 40.0);
   return h;
+}
+
+// What the oil reflects: a large soft light and smaller lights around it, coloured by the scene.
+vec3 oilColor(vec2 uv, vec3 on, int scene) {
+  vec3 L1 = normalize(vec3(-0.25, 0.35, 1.0));
+  vec3 L2 = normalize(vec3(0.38, -0.28, 1.0));
+  vec3 L3 = normalize(vec3(-0.42, -0.2, 1.0));
+  vec3 L4 = normalize(vec3(0.42, 0.25, 1.0));
+  float sheen = pow(max(dot(on, L1), 0.0), 24.0);
+  float g1 = pow(max(dot(on, L1), 0.0), 260.0);
+  float g2 = pow(max(dot(on, L2), 0.0), 400.0);
+  float g3 = pow(max(dot(on, L3), 0.0), 300.0);
+  float g4 = pow(max(dot(on, L4), 0.0), 300.0);
+  float r = length(uv);
+  if (scene == 1) {
+    // Pale oil on the studio set: its waves show as reflections of the dark cards beside it.
+    vec3 base = mix(vec3(0.86, 0.865, 0.875), vec3(0.7, 0.71, 0.73), smoothstep(0.2, 1.1, r));
+    float flags = pow(max(dot(on, L2), 0.0), 200.0) + pow(max(dot(on, L3), 0.0), 200.0);
+    return base * (1.0 - 0.45 * flags) + vec3(0.1) * g1;
+  }
+  vec3 base = vec3(0.006, 0.007, 0.009) + vec3(0.02) * exp(-r * r * 3.0);
+  vec3 c1 = vec3(0.85, 0.9, 1.0);
+  vec3 c2 = vec3(0.8);
+  vec3 c3 = vec3(0.7);
+  vec3 c4 = vec3(0.6);
+  if (scene == 2) {
+    base = mix(vec3(0.16, 0.07, 0.06), vec3(0.03, 0.02, 0.05), smoothstep(-0.5, 0.6, uv.y + r * 0.3));
+    c1 = vec3(1.0, 0.62, 0.32);
+    c2 = vec3(0.7, 0.45, 0.9);
+    c3 = vec3(0.8, 0.4, 0.32);
+    c4 = c2 * 0.7;
+  } else if (scene == 4) {
+    base = vec3(0.006, 0.004, 0.012);
+    c1 = hsv(uLook.x, 0.85, 1.0);
+    c2 = hsv(uLook.y, 0.85, 1.0);
+    c3 = c1;
+    c4 = c2;
+  }
+  return base + c1 * (sheen * 0.05 + g1 * 0.8) + c2 * g2 * 0.5 + c3 * g3 * 0.5 + c4 * g4 * 0.4;
 }
 
 vec3 backdrop(vec2 uv, int scene) {
@@ -660,34 +707,13 @@ void main() {
   vec3 col = backdrop(uv, scene);
   bool rig = scene == 5;
 
-  if (rig && dT > -aa) {
+  // Outside the tile: glossy oil, whose waves show only through the light they reflect.
+  if (dT > -aa && scene != 3) {
     vec2 e = vec2(0.0015, 0.0);
-    vec2 g = vec2(rigOil(uv + e.xy) - rigOil(uv - e.xy), rigOil(uv + e.yx) - rigOil(uv - e.yx)) / (2.0 * e.x);
-    vec3 on = normalize(vec3(-g * 3.0, 1.0));
-    float gloss = pow(max(dot(on, normalize(vec3(-0.25, 0.35, 1.0))), 0.0), 260.0);
-    gloss += 0.5 * pow(max(dot(on, normalize(vec3(0.35, -0.3, 1.0))), 0.0), 400.0);
-    gloss += 0.6 * pow(max(dot(on, normalize(vec3(-0.4, -0.15, 1.0))), 0.0), 300.0);
-    gloss += 0.4 * pow(max(dot(on, normalize(vec3(0.4, 0.2, 1.0))), 0.0), 300.0);
-    col = vec3(0.008, 0.008, 0.01) + vec3(0.85) * gloss;
-  }
-
-  // Outside the tile: the oil, catching light on its waves and on the rounded rings the tile sends out.
-  if (!rig && dT > -aa) {
-    float echoes = exp(-pow((dT - 0.016) / 0.002, 2.0)) * 0.28 + exp(-pow((dT - 0.036) / 0.0026, 2.0)) * 0.14
-      + exp(-pow((dT - 0.064) / 0.003, 2.0)) * 0.07;
-    float hum = sin(dT * 140.0 - uTime * 6.0) * exp(-dT * 9.0) * (0.015 + 0.08 * uLive.x * k);
-    vec3 lines = scene == 4 ? hsv(uLook.y, 0.75, 1.0) : vec3(1.0);
-    vec3 outside = lines * (echoes + hum) * ink;
-    for (int i = 0; i < 12; i++) {
-      float s = uRipStr[i];
-      if (s <= 0.0) continue;
-      float age = uRip[i].z;
-      float r = 0.02 + age * 0.22;
-      outside += mix(vec3(1.0), hsv(uRip[i].w, 0.6, 1.0), 0.6) * exp(-pow((dT - r) / (0.004 + age * 0.004), 2.0)) * exp(-age * 1.3) * s * 0.35 * ink;
-    }
-    vec3 on = normalize(vec3(-slope, 1.0));
-    outside += vec3(0.22) * pow(max(dot(on, normalize(L)), 0.0), 120.0) * ink;
-    if (scene != 3) col += outside * (1.0 - inside);
+    vec2 g = vec2(oilHeight(uv + e.xy) - oilHeight(uv - e.xy), oilHeight(uv + e.yx) - oilHeight(uv - e.yx)) / (2.0 * e.x);
+    col = oilColor(uv, normalize(vec3(-g * 3.0, 1.0)), scene);
+    // The glass slab's own outer walls, just beyond its rim.
+    col += vec3(exp(-pow((dT - 0.016) / 0.002, 2.0)) * 0.22 + exp(-pow((dT - 0.036) / 0.0026, 2.0)) * 0.1) * ink;
   }
 
   // Inside: down through the glass and the moving oil to the note on the floor.
