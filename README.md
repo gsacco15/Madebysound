@@ -27,6 +27,11 @@ Every push to `main` redeploys. `vercel.json` allows the microphone, wake lock a
 `.vercelignore` leaves tests and scripts out of the deployment. A real HTTPS address is what AR Quick Look,
 the microphone and Spotify sign-in need. GitHub Actions runs the tests on every push (`.github/workflows/ci.yml`).
 
+Shared links show a preview card (`icons/og.jpg`) in Messages, social apps and the share sheet, and the
+home-screen icon is `icons/icon-180.png`; `scripts/make-icons.mjs` renders both from the Tile view. The
+preview's image URL in `index.html` must be absolute, so it names `https://madebysound.vercel.app`;
+change it there if the app moves to another address.
+
 ## How a song becomes a note
 
 `js/analysis.js` reads the whole track (up to 8 minutes) at 22 kHz with a 2048-point FFT and a 512-sample
